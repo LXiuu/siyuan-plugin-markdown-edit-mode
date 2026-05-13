@@ -1,0 +1,45 @@
+{
+  "name": "siyuan-plugin-markdown-edit-mode",
+  "author": "LXiuu",
+  "url": "https://github.com/LXiuu/siyuan-plugin-markdown-edit-mode",
+  "version": "0.1.0",
+  "minAppVersion": "3.3.0",
+  "backends": [
+    "windows",
+    "linux",
+    "darwin",
+    "docker",
+    "all"
+  ],
+  "frontends": [
+    "desktop",
+    "browser-desktop",
+    "desktop-window",
+    "all"
+  ],
+  "disabledInPublish": true,
+  "displayName": {
+    "default": "Markdown Edit Mode",
+    "zh_CN": "Markdown 编辑模式"
+  },
+  "description": {
+    "default": "Switch the current document into a lightweight Markdown source editor.",
+    "zh_CN": "将当前文档切换为轻量 Markdown 源码编辑状态。"
+  },
+  "readme": {
+    "default": "README.md",
+    "zh_CN": "README_zh_CN.md"
+  },
+  "funding": {
+    "openCollective": "",
+    "patreon": "",
+    "github": "",
+    "custom": []
+  },
+  "keywords": [
+    "Markdown",
+    "源码模式",
+    "编辑器",
+    "Source Mode"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Markdown 编辑模式",
+  "description": "将当前文档切换为轻量 Markdown 源码编辑状态。",
+  "buttonEnterSourceMode": "源码模式",
+  "buttonExitSourceMode": "退出模式",
+  "titleToggleSourceMode": "切换 Markdown 源码模式",
+  "titleSaveAndExitSourceMode": "保存并退出 Markdown 源码模式",
+  "messageDocumentNotFound": "未找到当前文档",
+  "messageEnterFailed": "进入源码模式失败：{{message}}",
+  "messageMarkdownSaved": "Markdown 已保存",
+  "messageSaveFailed": "保存 Markdown 失败：{{message}}",
+  "dialogSaveRiskTitle": "保存源码模式内容",
+  "dialogSaveRiskContent": "标准 Markdown 写回会重新解析文档，复杂块、块属性和子块 ID 不保证无损。是否继续保存？",
+  "statusRealtimeEnabled": "实时更新已启用",
+  "statusRealtimeReadonly": "当前处于只读模式，无法实时更新",
+  "statusRealtimeSaving": "正在实时更新...",
+  "statusRealtimeSuccess": "实时更新成功 {{time}}",
+  "statusRealtimeFailed": "实时更新失败 {{time}}",
+  "errorExportFailed": "导出 Markdown 失败",
+  "errorSaveFailed": "保存 Markdown 失败",
+  "errorRefreshEditorFailed": "刷新思源编辑器失败"
+}

@@ -1,0 +1,44 @@
+{
+  "name": "siyuan-plugin-markdown-edit-mode",
+  "version": "0.1.0",
+  "description": "Markdown source edit mode plugin for SiYuan.",
+  "type": "module",
+  "main": "index.js",
+  "author": "LXiuu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LXiuu/siyuan-plugin-markdown-edit-mode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LXiuu/siyuan-plugin-markdown-edit-mode/issues"
+  },
+  "homepage": "https://github.com/LXiuu/siyuan-plugin-markdown-edit-mode#readme",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build",
+    "package": "npm run build && node scripts/package.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "siyuan",
+    "plugin",
+    "markdown",
+    "source-mode"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "jszip": "^3.10.1",
+    "siyuan": "^1.2.1",
+    "typescript": "^5.4.5",
+    "vite": "^8.0.11"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.42.1",
+    "@lezer/highlight": "^1.2.3"
+  }
+}
