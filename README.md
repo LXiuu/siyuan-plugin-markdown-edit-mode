@@ -19,9 +19,9 @@ The plugin adds a source-mode button near the lower-left corner of the active do
 ## Usage
 
 1. Open a regular document.
-2. Click `源码模式` in the lower-left corner.
+2. Click `Source` in the lower-left corner.
 3. Edit the Markdown source.
-4. Wait for the lower-right status to show that the real-time update succeeded, or click `退出源码模式` to save pending changes and return to the rendered view.
+4. Wait for the lower-right status to show that the real-time update succeeded, or click `Exit` to save pending changes and return to the rendered view.
 
 Keyboard shortcuts:
 
@@ -36,11 +36,11 @@ Status messages:
 
 | Status | Meaning |
 | --- | --- |
-| `实时更新已启用` | Source mode is open and waiting for edits |
-| `正在实时更新...` | Markdown is being written back to the current document |
-| `实时更新成功` | The latest change has been written back |
-| `实时更新失败` | The latest write failed; avoid closing source mode before handling it |
-| `当前处于只读模式，无法实时更新` | The current environment does not allow writes |
+| `Real-time updates enabled` | Source mode is open and waiting for edits |
+| `Updating...` | Markdown is being written back to the current document |
+| `Updated HH:MM:SS` | The latest change has been written back |
+| `Update failed HH:MM:SS` | The latest write failed; avoid closing source mode before handling it |
+| `The current context is read-only; real-time updates are disabled` | The current environment does not allow writes |
 
 ## Notes
 
