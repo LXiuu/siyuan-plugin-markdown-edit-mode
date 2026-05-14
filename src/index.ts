@@ -18,7 +18,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { Plugin, confirm, showMessage } from "siyuan";
+import { Plugin, confirm, getFrontend, showMessage } from "siyuan";
 
 import { exportMdContent, updateBlockByMarkdown } from "./api";
 import {
@@ -54,6 +54,7 @@ const RELOAD_RESTORE_TIMEOUT_MS = 6000;
 const RELOAD_RESTORE_DEBOUNCE_MS = 80;
 const RELOAD_RESTORE_GRACE_MS = 240;
 const DOUBLE_CTRL_TAP_INTERVAL_MS = 450;
+const SUPPORTED_FRONTENDS = new Set(["desktop", "browser-desktop", "desktop-window"]);
 
 const DEFAULT_I18N = {
   name: "Markdown Edit Mode",
@@ -153,6 +154,10 @@ export default class MarkdownEditModePlugin extends Plugin {
   }
 
   onload() {
+    if (!isSupportedFrontend()) {
+      return;
+    }
+
     window.addEventListener("keydown", this.keydownHandler, true);
     window.addEventListener("keyup", this.keyupHandler, true);
     window.addEventListener("resize", this.windowResizeHandler, true);
@@ -163,6 +168,10 @@ export default class MarkdownEditModePlugin extends Plugin {
   }
 
   onLayoutReady() {
+    if (!isSupportedFrontend()) {
+      return;
+    }
+
     this.createStatusButton();
   }
 
@@ -194,22 +203,38 @@ export default class MarkdownEditModePlugin extends Plugin {
     button.setAttribute("aria-label", this.t("titleToggleSourceMode"));
     button.setAttribute("aria-pressed", "false");
 
-    button.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-
+    const captureCursor = () => {
       if (this.isEntering || this.isSaving || this.isRestoringRenderedCursor) {
         return;
       }
 
       const context = getActiveEditorContext();
       this.pendingCursorHint = context ? this.captureRenderedCursor(context) : null;
-    });
+    };
 
-    button.addEventListener("mousedown", (event) => {
-      event.preventDefault();
+    button.addEventListener("pointerdown", (event) => {
+      preventModeButtonFocus(event);
+      captureCursor();
     });
-
-    button.addEventListener("click", () => {
+    button.addEventListener("mousedown", preventModeButtonFocus);
+    button.addEventListener(
+      "touchstart",
+      (event) => {
+        preventModeButtonFocus(event);
+        captureCursor();
+      },
+      { passive: false },
+    );
+    button.addEventListener(
+      "touchend",
+      (event) => {
+        preventModeButtonFocus(event);
+        void this.toggleSourceMode();
+      },
+      { passive: false },
+    );
+    button.addEventListener("click", (event) => {
+      preventModeButtonFocus(event);
       void this.toggleSourceMode();
     });
 
@@ -325,15 +350,35 @@ export default class MarkdownEditModePlugin extends Plugin {
     exitButton.title = this.t("titleSaveAndExitSourceMode");
     exitButton.setAttribute("aria-label", this.t("titleSaveAndExitSourceMode"));
     exitButton.style.left = this.statusButton?.style.left || "12px";
-    exitButton.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      this.rememberSourceCursor(editor);
-    });
-    exitButton.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-    });
-    exitButton.addEventListener("click", () => {
+    const rememberCursor = () => this.rememberSourceCursor(editor);
+    const exit = () => {
       void this.exitSourceMode(true);
+    };
+
+    exitButton.addEventListener("pointerdown", (event) => {
+      preventModeButtonFocus(event);
+      rememberCursor();
+    });
+    exitButton.addEventListener("mousedown", preventModeButtonFocus);
+    exitButton.addEventListener(
+      "touchstart",
+      (event) => {
+        preventModeButtonFocus(event);
+        rememberCursor();
+      },
+      { passive: false },
+    );
+    exitButton.addEventListener(
+      "touchend",
+      (event) => {
+        preventModeButtonFocus(event);
+        exit();
+      },
+      { passive: false },
+    );
+    exitButton.addEventListener("click", (event) => {
+      preventModeButtonFocus(event);
+      exit();
     });
 
     const saveStatus = document.createElement("div");
@@ -1302,6 +1347,19 @@ function clampEditorPosition(position: number, length: number): number {
 
 function sanitizeViewportY(viewportY: number | null | undefined): number | null {
   return typeof viewportY === "number" && Number.isFinite(viewportY) ? viewportY : null;
+}
+
+function isSupportedFrontend(): boolean {
+  try {
+    return SUPPORTED_FRONTENDS.has(getFrontend());
+  } catch {
+    return true;
+  }
+}
+
+function preventModeButtonFocus(event: Event) {
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 function setSourceEditorTextWidth(editorHost: HTMLElement, width: number | null) {

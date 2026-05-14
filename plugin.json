@@ -2,20 +2,18 @@
   "name": "siyuan-plugin-markdown-edit-mode",
   "author": "LXiuu",
   "url": "https://github.com/LXiuu/siyuan-plugin-markdown-edit-mode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "3.3.0",
   "backends": [
     "windows",
     "linux",
     "darwin",
-    "docker",
-    "all"
+    "docker"
   ],
   "frontends": [
     "desktop",
     "browser-desktop",
-    "desktop-window",
-    "all"
+    "desktop-window"
   ],
   "disabledInPublish": true,
   "displayName": {

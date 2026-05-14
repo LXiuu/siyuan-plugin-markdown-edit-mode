@@ -2,6 +2,8 @@
 
 A lightweight SiYuan plugin that temporarily switches the current document into a Markdown source editor.
 
+This version supports desktop frontends only: `desktop`, `browser-desktop`, and `desktop-window`.
+
 The plugin adds a source-mode button near the lower-left corner of the active document. Click it to open a full-screen Markdown source editor, edit the document as plain Markdown, then leave source mode to return to SiYuan’s rendered editing view.
 
 ## Overview
@@ -65,6 +67,11 @@ Edits in source mode are written back automatically after a short delay. If you 
 If a real-time update fails, the source editor is kept open so your current Markdown is not discarded.
 
 ## Changelog
+
+### v0.1.1
+
+- Removed `all` from the plugin manifest frontend/backend declarations so mobile clients do not load the desktop source editor after sync.
+- Added touch-event guards for the source-mode buttons to avoid focusing the editor and opening the soft keyboard when tapping exit.
 
 ### v0.1.0
 
