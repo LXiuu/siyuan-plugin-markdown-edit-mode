@@ -57,7 +57,7 @@ const DOUBLE_CTRL_TAP_INTERVAL_MS = 450;
 const SUPPORTED_FRONTENDS = new Set(["desktop", "browser-desktop", "desktop-window"]);
 
 const DEFAULT_I18N = {
-  name: "Markdown Edit Mode",
+  name: "Markdown Source Mode",
   description: "Switch the current document into a lightweight Markdown source editor.",
   buttonEnterSourceMode: "Source",
   buttonExitSourceMode: "Exit",

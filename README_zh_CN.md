@@ -1,4 +1,4 @@
-# Markdown 编辑模式
+# Markdown源码模式
 
 将当前文档临时切换为 Markdown 源码编辑状态的思源笔记插件。
 

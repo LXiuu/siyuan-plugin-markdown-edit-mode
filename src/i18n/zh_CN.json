@@ -1,5 +1,5 @@
 {
-  "name": "Markdown 编辑模式",
+  "name": "Markdown源码模式",
   "description": "将当前文档切换为轻量 Markdown 源码编辑状态。",
   "buttonEnterSourceMode": "源码模式",
   "buttonExitSourceMode": "退出模式",

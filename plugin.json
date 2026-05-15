@@ -17,8 +17,8 @@
   ],
   "disabledInPublish": true,
   "displayName": {
-    "default": "Markdown Edit Mode",
-    "zh_CN": "Markdown 编辑模式"
+    "default": "Markdown Source Mode",
+    "zh_CN": "Markdown源码模式"
   },
   "description": {
     "default": "Switch the current document into a lightweight Markdown source editor.",

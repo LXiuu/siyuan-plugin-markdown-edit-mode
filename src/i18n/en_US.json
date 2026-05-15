@@ -1,5 +1,5 @@
 {
-  "name": "Markdown Edit Mode",
+  "name": "Markdown Source Mode",
   "description": "Switch the current document into a lightweight Markdown source editor.",
   "buttonEnterSourceMode": "Source",
   "buttonExitSourceMode": "Exit",

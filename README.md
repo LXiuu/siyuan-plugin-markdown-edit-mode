@@ -1,4 +1,4 @@
-# Markdown Edit Mode
+# Markdown Source Mode
 
 A lightweight SiYuan plugin that temporarily switches the current document into a Markdown source editor.
 
