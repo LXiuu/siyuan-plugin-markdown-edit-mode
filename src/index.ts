@@ -7,7 +7,7 @@ import {
   indentOnInput,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   EditorView,
   drawSelection,
@@ -31,7 +31,6 @@ import {
 import {
   getActiveEditorContext,
   getEditorContextByDocId,
-  type ReloadableEditor,
 } from "./dom";
 import { getErrorMessage } from "./error";
 import { normalizeMarkdownForSave, normalizePastedMarkdown } from "./markdown";
@@ -114,7 +113,6 @@ export default class MarkdownEditModePlugin extends Plugin {
   private isEntering = false;
   private isSaving = false;
   private activeDocId: string | null = null;
-  private activeEditor: ReloadableEditor | null = null;
   private activeProtyle: HTMLElement | null = null;
   private sourceEditor: EditorView | null = null;
   private originalMarkdown = "";
@@ -129,6 +127,7 @@ export default class MarkdownEditModePlugin extends Plugin {
   private lastRenderedCursorHint: DocumentCursorHint | null = null;
   private lastSourceCursor: SourceCursorSnapshot | null = null;
   private realtimeSaveTimerId: number | null = null;
+  private readonlySyncTimerId: number | null = null;
   private realtimeSavePromise: Promise<boolean> | null = null;
   private realtimeSaveRequested = false;
   private sourceDirty = false;
@@ -140,6 +139,10 @@ export default class MarkdownEditModePlugin extends Plugin {
   private statusButtonFrameId: number | null = null;
   private sourceWidthFrameId: number | null = null;
   private sourceEditorTextWidth: number | null = null;
+  private reloadRestoreCleanup: (() => void) | null = null;
+  private sourceReadonly = false;
+  private readonlyCompartment = new Compartment();
+  private editableCompartment = new Compartment();
   private ctrlTapArmed = false;
   private ctrlTapHadOtherKey = false;
   private lastCtrlTapAt = 0;
@@ -184,7 +187,10 @@ export default class MarkdownEditModePlugin extends Plugin {
     window.removeEventListener("beforeunload", this.beforeUnloadHandler, true);
     window.removeEventListener("pagehide", this.beforeUnloadHandler, true);
     void this.flushRealtimeSave();
+    this.cleanupReloadRestore();
     this.cleanupSourceMode();
+    this.cancelScheduledFrames();
+    this.operationGeneration += 1;
     this.statusButton?.remove();
     this.statusButton = null;
   }
@@ -290,7 +296,6 @@ export default class MarkdownEditModePlugin extends Plugin {
       const initialCursor = resolveMarkdownCursorPosition(markdown, cursorHint);
       this.activeProtyle = context.protyle;
       this.activeDocId = context.docId;
-      this.activeEditor = context.editor ?? null;
       const editor = this.createFullscreenEditor(
         markdown,
         initialCursor,
@@ -299,6 +304,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       );
 
       this.sourceEditor = editor;
+      this.startReadonlySync();
       this.originalMarkdown = markdown;
       this.lastSavedMarkdown = markdown;
       this.sourceDirty = false;
@@ -383,7 +389,9 @@ export default class MarkdownEditModePlugin extends Plugin {
 
     const saveStatus = document.createElement("div");
     saveStatus.className = SAVE_STATUS_CLASS;
-    saveStatus.textContent = this.t("statusRealtimeEnabled");
+    saveStatus.textContent = this.isReadonlyContext()
+      ? this.t("statusRealtimeReadonly")
+      : this.t("statusRealtimeEnabled");
 
     fullscreen.appendChild(editorHost);
     fullscreen.appendChild(exitButton);
@@ -441,6 +449,8 @@ export default class MarkdownEditModePlugin extends Plugin {
   }
 
   private createEditorExtensions(): Extension[] {
+    const readonly = this.isReadonlyContext();
+
     return [
       lineNumbers({
         formatNumber: (lineNumber) => (lineNumber % 5 === 0 ? String(lineNumber) : ""),
@@ -449,7 +459,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       drawSelection(),
       dropCursor(),
       EditorState.allowMultipleSelections.of(true),
-      EditorState.readOnly.of(false),
+      this.readonlyCompartment.of(EditorState.readOnly.of(readonly)),
       indentOnInput(),
       bracketMatching(),
       highlightActiveLine(),
@@ -457,7 +467,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       markdown(),
       EditorView.lineWrapping,
       syntaxHighlighting(typoraHighlightStyle, { fallback: true }),
-      EditorView.editable.of(true),
+      this.editableCompartment.of(EditorView.editable.of(!readonly)),
       EditorView.domEventHandlers({
         paste: (event, view) => this.handleEditorPaste(event, view),
       }),
@@ -516,6 +526,11 @@ export default class MarkdownEditModePlugin extends Plugin {
   }
 
   private handleEditorPaste(event: ClipboardEvent, view: EditorView): boolean {
+    if (view.state.readOnly) {
+      event.preventDefault();
+      return true;
+    }
+
     const clipboardText = event.clipboardData?.getData("text/plain");
 
     if (!clipboardText) {
@@ -538,7 +553,31 @@ export default class MarkdownEditModePlugin extends Plugin {
 
   private isReadonlyContext(): boolean {
     const siyuan = (window as any).siyuan;
-    return Boolean(siyuan?.config?.readonly || siyuan?.isPublish);
+    if (
+      siyuan?.config?.readonly ||
+      siyuan?.config?.editor?.readOnly ||
+      siyuan?.isPublish
+    ) {
+      return true;
+    }
+
+    return this.isActiveProtyleDisabled();
+  }
+
+  private isActiveProtyleDisabled(): boolean {
+    const context = getActiveEditorContext();
+
+    if (context?.disabled === true) {
+      return true;
+    }
+
+    const protyle = this.activeProtyle ?? context?.protyle ?? null;
+
+    if (!protyle) {
+      return false;
+    }
+
+    return protyle.querySelector('[contenteditable="true"]') === null;
   }
 
   private confirmWriteRisk(): Promise<boolean> {
@@ -581,16 +620,15 @@ export default class MarkdownEditModePlugin extends Plugin {
     );
     this.cacheRenderedCursorHint(docId, renderCursorHint);
     let saved = false;
-    let editorToRefresh: ReloadableEditor | null = null;
 
     try {
       this.isSaving = true;
       this.updateButtonsBusy(true);
       const generation = this.beginOperation();
+      const readonly = this.isReadonlyContext();
 
-      if (save) {
+      if (save && !readonly) {
         saved = await this.flushRealtimeSave();
-        editorToRefresh = this.activeEditor;
 
         if (generation !== this.operationGeneration) {
           return;
@@ -599,6 +637,8 @@ export default class MarkdownEditModePlugin extends Plugin {
         if (this.hasSourceChanges()) {
           return;
         }
+      } else if (readonly) {
+        this.updateRealtimeSaveStatus(this.t("statusRealtimeReadonly"), true);
       }
 
       const shouldReloadEditor = saved || this.hasRealtimeSaved;
@@ -607,7 +647,7 @@ export default class MarkdownEditModePlugin extends Plugin {
         this.tryRestoreRenderedCursor(docId, renderCursorHint);
         this.cleanupSourceMode();
         this.lockRenderedCursorRestore(generation);
-        this.reloadEditor(editorToRefresh, docId, renderCursorHint, generation);
+        this.reloadEditor(docId, renderCursorHint, generation);
         showMessage(this.t("messageMarkdownSaved"), 2000, "info");
       } else {
         this.cleanupSourceMode();
@@ -628,6 +668,7 @@ export default class MarkdownEditModePlugin extends Plugin {
 
   private cleanupSourceMode() {
     this.stopRealtimeSaveTimer();
+    this.stopReadonlySync();
     this.sourceEditor?.destroy();
     this.sourceEditor = null;
     this.saveStatusElement = null;
@@ -639,7 +680,6 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.isSaving = false;
     this.isRestoringRenderedCursor = false;
     this.activeDocId = null;
-    this.activeEditor = null;
     this.activeProtyle = null;
     this.lastSourceCursor = null;
     this.originalMarkdown = "";
@@ -651,11 +691,63 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.removedDocTitleHeadingCount = 0;
     this.activeDocTitle = null;
     this.sourceEditorTextWidth = null;
+    this.sourceReadonly = false;
 
     this.updateButtonState(false);
     this.updateButtonsBusy(false);
     this.positionStatusButton();
   }
+
+  private cancelScheduledFrames() {
+    if (this.statusButtonFrameId !== null) {
+      window.cancelAnimationFrame(this.statusButtonFrameId);
+      this.statusButtonFrameId = null;
+    }
+
+    if (this.sourceWidthFrameId !== null) {
+      window.cancelAnimationFrame(this.sourceWidthFrameId);
+      this.sourceWidthFrameId = null;
+    }
+  }
+
+  private startReadonlySync() {
+    this.stopReadonlySync();
+    this.syncSourceReadonlyState();
+    this.readonlySyncTimerId = window.setInterval(this.syncSourceReadonlyState, 500);
+  }
+
+  private stopReadonlySync() {
+    if (this.readonlySyncTimerId !== null) {
+      window.clearInterval(this.readonlySyncTimerId);
+      this.readonlySyncTimerId = null;
+    }
+  }
+
+  private syncSourceReadonlyState = () => {
+    const editor = this.sourceEditor;
+
+    if (!editor) {
+      return;
+    }
+
+    const readonly = this.isReadonlyContext();
+
+    if (readonly === this.sourceReadonly) {
+      return;
+    }
+
+    this.sourceReadonly = readonly;
+    editor.dispatch({
+      effects: [
+        this.readonlyCompartment.reconfigure(EditorState.readOnly.of(readonly)),
+        this.editableCompartment.reconfigure(EditorView.editable.of(!readonly)),
+      ],
+    });
+    this.updateRealtimeSaveStatus(
+      readonly ? this.t("statusRealtimeReadonly") : this.t("statusRealtimeEnabled"),
+      readonly,
+    );
+  };
 
   private updateButtonState(active: boolean) {
     if (!this.statusButton) {
@@ -1008,7 +1100,6 @@ export default class MarkdownEditModePlugin extends Plugin {
   }
 
   private reloadEditor(
-    editor: ReloadableEditor | null,
     docId: string,
     cursorHint: ProtyleCursorHint | null,
     generation: number,
@@ -1021,7 +1112,8 @@ export default class MarkdownEditModePlugin extends Plugin {
       }
 
       try {
-        editor?.reload(false);
+        const currentContext = getEditorContextByDocId(docId);
+        currentContext?.editor?.reload(false);
         this.restoreRenderedCursor(docId, cursorHint, true, generation, onCursorRestored);
       } catch (error) {
         console.warn(this.t("errorRefreshEditorFailed"), error);
@@ -1086,9 +1178,33 @@ export default class MarkdownEditModePlugin extends Plugin {
 
       observer?.disconnect();
       observer = null;
+      this.reloadRestoreCleanup = null;
 
       this.unlockRenderedCursorRestore(generation);
       onFinished?.(success);
+    };
+
+    this.cleanupReloadRestore();
+    this.reloadRestoreCleanup = () => {
+      if (debounceId !== null) {
+        window.clearTimeout(debounceId);
+        debounceId = null;
+      }
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      if (graceId !== null) {
+        window.clearTimeout(graceId);
+        graceId = null;
+      }
+
+      observer?.disconnect();
+      observer = null;
+      this.reloadRestoreCleanup = null;
+      this.unlockRenderedCursorRestore(generation);
     };
 
     const tryRestore = () => {
@@ -1149,6 +1265,16 @@ export default class MarkdownEditModePlugin extends Plugin {
   private findReloadObserverTarget(docId: string): HTMLElement | null {
     const context = getEditorContextByDocId(docId);
     return context?.protyle ?? null;
+  }
+
+  private cleanupReloadRestore() {
+    const cleanup = this.reloadRestoreCleanup;
+
+    if (!cleanup) {
+      return;
+    }
+
+    cleanup();
   }
 
   private beginOperation(): number {

@@ -4,6 +4,7 @@ export interface ActiveEditorContext {
   docId: string;
   protyle: HTMLElement;
   editor?: ReloadableEditor;
+  disabled?: boolean;
 }
 
 export interface ReloadableEditor {
@@ -46,10 +47,33 @@ function getActiveEditorContextByApi(): ActiveEditorContext | null {
   const protyle = getProtyleElementFromInstance(protyleInstance);
 
   if (docId && protyle) {
-    return { docId, protyle, editor: getReloadableEditor(editor) };
+    return {
+      docId,
+      protyle,
+      editor: getReloadableEditor(editor),
+      disabled: getProtyleDisabledFromInstance(protyleInstance),
+    };
   }
 
   return null;
+}
+
+function getProtyleDisabledFromInstance(
+  protyleInstance: Record<string, any> | null,
+): boolean | undefined {
+  if (!protyleInstance) {
+    return undefined;
+  }
+
+  if (typeof protyleInstance.disabled === "boolean") {
+    return protyleInstance.disabled;
+  }
+
+  if (typeof protyleInstance.protyle?.disabled === "boolean") {
+    return protyleInstance.protyle.disabled;
+  }
+
+  return undefined;
 }
 
 function getPossibleProtyleInstance(editor: unknown): Record<string, any> | null {

@@ -68,6 +68,14 @@ If a real-time update fails, the source editor is kept open so your current Mark
 
 ## Changelog
 
+### v0.1.2
+
+- Added dynamic read-only synchronization for source mode, including SiYuan editor read-only settings, publish mode, and disabled Protyle instances.
+- Made the source editor non-editable in read-only contexts and blocked paste dispatches while read-only.
+- Hardened cleanup during plugin unload, reload, and update so pending cursor-restore observers, timers, and animation frames are released.
+- Avoided calling stale editor reload handles after a document tab has been destroyed or reopened.
+- Verified the desktop UI on the declared frontends: `desktop`, `browser-desktop`, and `desktop-window`.
+
 ### v0.1.1
 
 - Removed `all` from the plugin manifest frontend/backend declarations so mobile clients do not load the desktop source editor after sync.
