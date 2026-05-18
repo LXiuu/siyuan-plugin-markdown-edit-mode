@@ -6,6 +6,13 @@ This version supports desktop frontends only: `desktop`, `browser-desktop`, and 
 
 The plugin adds a source-mode button near the lower-left corner of the active document. Click it to open a full-screen Markdown source editor, edit the document as plain Markdown, then leave source mode to return to SiYuan’s rendered editing view.
 
+## Before You Use It
+
+- **Source mode writes Markdown back to SiYuan and lets SiYuan reparse it into blocks; it is not a lossless internal block-source editor.**
+- **Database blocks, super blocks, embeds, block/custom attributes, child block IDs, block references, PDF annotations, and complex HTML may not be preserved completely.**
+- **Edits are written back automatically while you type; avoid changing content if you only want to inspect the source.**
+- **Back up important or complex documents first. If an update fails, copy the current Markdown before handling the error.**
+
 ## Overview
 
 - Adds a lower-left source mode toggle that visually fits SiYuan’s status-bar style.
@@ -44,29 +51,12 @@ Status messages:
 | `Update failed HH:MM:SS` | The latest write failed; avoid closing source mode before handling it |
 | `The current context is read-only; real-time updates are disabled` | The current environment does not allow writes |
 
-## Notes
-
-Source mode writes standard Markdown back to SiYuan. When saved, SiYuan reparses that Markdown into block structures, so this is not a lossless internal block-source mode.
-
-The following content is not guaranteed to be preserved losslessly:
-
-- Database blocks
-- Super blocks
-- Embed blocks
-- Block attributes and custom attributes
-- Child block IDs
-- Block references and backlink relationships
-- PDF annotations
-- Complex HTML blocks
-- Other content that depends on SiYuan’s internal block structure
-
-Use this plugin first with ordinary Markdown documents. Back up important or complex documents before editing them in source mode.
-
-Edits in source mode are written back automatically after a short delay. If you only want to inspect the source, avoid changing the content.
-
-If a real-time update fails, the source editor is kept open so your current Markdown is not discarded.
-
 ## Changelog
+
+### v0.1.3
+
+- Moved and bolded usage notes with shorter risk guidance.
+- Set backend compatibility to `all`.
 
 ### v0.1.2
 
@@ -78,7 +68,7 @@ If a real-time update fails, the source editor is kept open so your current Mark
 
 ### v0.1.1
 
-- Removed `all` from the plugin manifest frontend/backend declarations so mobile clients do not load the desktop source editor after sync.
+- Removed `all` from the plugin manifest frontend declarations so mobile clients do not load the desktop source editor after sync.
 - Added touch-event guards for the source-mode buttons to avoid focusing the editor and opening the soft keyboard when tapping exit.
 
 ### v0.1.0
