@@ -53,6 +53,13 @@ Status messages:
 
 ## Changelog
 
+### v0.1.4
+
+- Improved the source-mode button in split views so it follows the document area currently being edited.
+- Fixed missing, misplaced, and overlapping buttons in vertical and horizontal split views.
+- Updated the source-mode and exit buttons to better match SiYuan’s bottom status bar style.
+- Improved source editor width in narrow split views for a more comfortable reading area.
+
 ### v0.1.3
 
 - Moved and bolded usage notes with shorter risk guidance.

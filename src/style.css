@@ -4,14 +4,15 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
-  height: 22px;
+  height: 24px;
+  box-sizing: border-box;
   min-width: 0;
-  line-height: 20px;
+  line-height: 24px;
   padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--b3-theme-on-surface);
+  border: none;
+  border-radius: var(--Sv-status-radius, 6px);
+  background: var(--Sv-status-msg-background, var(--b3-theme-background, #ffffff));
+  color: var(--Sv-fixed-item-text, var(--b3-theme-on-surface));
   box-shadow: none;
   cursor: pointer;
   font-size: 12px;
@@ -21,17 +22,17 @@
 }
 
 .markdown-edit-mode-btn-icon {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .markdown-edit-mode-btn-icon svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   display: block;
   fill: none;
 }
@@ -43,11 +44,11 @@
 }
 
 .markdown-edit-mode-btn-icon-code {
-  stroke: #0f766e;
+  stroke: currentColor;
 }
 
 .markdown-edit-mode-btn-icon-slash {
-  stroke: #dc4f87;
+  stroke: currentColor;
 }
 
 .markdown-edit-mode-btn-label {
@@ -63,7 +64,7 @@
 
 .markdown-edit-mode-status-btn:hover,
 .markdown-edit-mode-exit-btn:hover {
-  background: var(--b3-list-hover);
+  background: var(--Sv-status-item-hover, var(--b3-list-hover, rgba(0, 0, 0, 0.06)));
   color: var(--b3-theme-on-background);
 }
 
@@ -74,9 +75,8 @@
 }
 
 .markdown-edit-mode-status-btn.is-active {
-  color: var(--b3-theme-on-surface);
-  border-color: transparent;
-  background: transparent;
+  color: var(--Sv-fixed-item-text, var(--b3-theme-on-surface));
+  background: var(--Sv-status-msg-background, var(--b3-theme-background, #ffffff));
 }
 
 .markdown-edit-mode-status-btn.is-hidden {

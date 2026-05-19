@@ -54,6 +54,7 @@ const RELOAD_RESTORE_DEBOUNCE_MS = 80;
 const RELOAD_RESTORE_GRACE_MS = 240;
 const DOUBLE_CTRL_TAP_INTERVAL_MS = 450;
 const SUPPORTED_FRONTENDS = new Set(["desktop", "browser-desktop", "desktop-window"]);
+const SOURCE_EDITOR_DEFAULT_TEXT_WIDTH = 690;
 
 const DEFAULT_I18N = {
   name: "Markdown Source Mode",
@@ -120,6 +121,7 @@ export default class MarkdownEditModePlugin extends Plugin {
   private removedDocTitleHeadingCount = 0;
   private activeDocTitle: string | null = null;
   private statusButton: HTMLButtonElement | null = null;
+  private statusButtonContext: { docId: string; protyle: HTMLElement } | null = null;
   private fullscreenElement: HTMLElement | null = null;
   private saveStatusElement: HTMLElement | null = null;
   private hasConfirmedWriteRisk = false;
@@ -206,6 +208,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.operationGeneration += 1;
     this.statusButton?.remove();
     this.statusButton = null;
+    this.statusButtonContext = null;
   }
 
   private createStatusButton() {
@@ -228,7 +231,7 @@ export default class MarkdownEditModePlugin extends Plugin {
         return;
       }
 
-      const context = getActiveEditorContext();
+      const context = this.statusButtonContext ?? getActiveEditorContext();
       this.pendingCursorHint = context ? this.captureRenderedCursor(context) : null;
     };
 
@@ -252,7 +255,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       (event) => {
         preventModeButtonFocus(event);
         this.statusButtonClickGate.suppress();
-        void this.toggleSourceMode();
+        void this.toggleSourceMode(this.statusButtonContext);
       },
       { passive: false },
     );
@@ -266,7 +269,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.positionStatusButton();
   }
 
-  private async toggleSourceMode() {
+  private async toggleSourceMode(context: { docId: string; protyle: HTMLElement } | null = null) {
     if (this.isEntering || this.isSaving || this.isRestoringRenderedCursor) {
       return;
     }
@@ -276,7 +279,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       return;
     }
 
-    await this.enterSourceMode();
+    await this.enterSourceMode(context);
   }
 
   private async toggleSourceModeFromButton() {
@@ -284,7 +287,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       return;
     }
 
-    await this.toggleSourceMode();
+    await this.toggleSourceMode(this.statusButtonContext);
   }
 
   private async exitSourceModeFromButton() {
@@ -295,12 +298,14 @@ export default class MarkdownEditModePlugin extends Plugin {
     await this.exitSourceMode(true);
   }
 
-  private async enterSourceMode() {
+  private async enterSourceMode(
+    requestedContext: { docId: string; protyle: HTMLElement } | null = null,
+  ) {
     if (this.isSourceMode || this.isEntering || this.isSaving || this.isRestoringRenderedCursor) {
       return;
     }
 
-    const context = getActiveEditorContext();
+    const context = requestedContext ?? getActiveEditorContext();
 
     if (!context) {
       showMessage(this.t("messageDocumentNotFound"), 3000, "error");
@@ -432,7 +437,6 @@ export default class MarkdownEditModePlugin extends Plugin {
     fullscreen.appendChild(exitButton);
     fullscreen.appendChild(saveStatus);
     document.body.appendChild(fullscreen);
-    setFixedButtonPosition(exitButton, getFixedButtonPosition(this.statusButton));
 
     const editor = new EditorView({
       parent: editorHost,
@@ -445,6 +449,7 @@ export default class MarkdownEditModePlugin extends Plugin {
 
     this.fullscreenElement = fullscreen;
     this.saveStatusElement = saveStatus;
+    this.positionExitButton(exitButton);
 
     window.setTimeout(() => {
       if (this.sourceEditor !== editor || !this.isSourceMode) {
@@ -452,6 +457,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       }
 
       this.syncSourceEditorWidth();
+      this.positionExitButton(exitButton);
       focusSourceEditorWithoutScroll(editor);
       editor.dispatch({
         selection: { anchor: clampEditorPosition(initialSelection, editor.state.doc.length) },
@@ -850,18 +856,18 @@ export default class MarkdownEditModePlugin extends Plugin {
       }
 
       const context = getActiveEditorContext();
-      const rect = context?.protyle.getBoundingClientRect();
+      const position = context ? getPanelModeButtonPosition(context.protyle, button) : null;
 
-      if (!rect || rect.width <= 0 || rect.height <= 0) {
+      this.statusButtonContext = context;
+
+      if (!position) {
         button.classList.add("is-hidden");
         return;
       }
 
       button.classList.remove("is-hidden");
-      setFixedButtonPosition(button, {
-        left: rect.left + 8,
-        bottom: getModeButtonBottomOffset(),
-      });
+      button.disabled = this.isEntering || this.isSaving || this.isRestoringRenderedCursor;
+      setFixedButtonPosition(button, position);
     });
   };
 
@@ -891,14 +897,16 @@ export default class MarkdownEditModePlugin extends Plugin {
         return;
       }
 
-      const left = Number.parseFloat(exitButton.style.left);
-      const bottom = getModeButtonBottomOffset();
-      setFixedButtonPosition(exitButton, {
-        left: Number.isFinite(left) ? left : 12,
-        bottom,
-      });
+      this.positionExitButton(exitButton);
     });
   };
+
+  private positionExitButton(exitButton: HTMLElement) {
+    const editorHost = this.fullscreenElement?.querySelector<HTMLElement>(`.${EDITOR_CLASS}`);
+    const position = getSourceEditorOutsideButtonPosition(editorHost, exitButton);
+
+    setFixedButtonPosition(exitButton, position);
+  }
 
   private scheduleSourceEditorWidthSync = () => {
     if (this.sourceWidthFrameId !== null) {
@@ -1602,143 +1610,168 @@ function createClickSuppressionGate(): ClickSuppressionGate {
 interface FixedButtonPosition {
   left: number;
   bottom: number;
+  minLeft?: number;
+  maxLeft?: number;
+  minBottom?: number;
+  maxBottom?: number;
 }
 
-function getFixedButtonPosition(button: HTMLElement | null): FixedButtonPosition {
-  if (!button) {
-    return {
-      left: 12,
-      bottom: getModeButtonBottomOffset(),
-    };
+const MODE_BUTTON_PANEL_INSET = 8;
+const MODE_BUTTON_MIN_PANEL_WIDTH = 120;
+const MODE_BUTTON_BOTTOM_GAP = 4;
+const MODE_BUTTON_ESTIMATED_WIDTH = 88;
+const MODE_BUTTON_ESTIMATED_HEIGHT = 24;
+const MODE_BUTTON_RESERVED_STATUS_WIDTH = 150;
+const SOURCE_EXIT_BUTTON_GAP = 8;
+
+function getPanelModeButtonPosition(
+  protyle: HTMLElement,
+  button: HTMLElement,
+): FixedButtonPosition | null {
+  const rect = protyle.getBoundingClientRect();
+
+  if (
+    rect.width < MODE_BUTTON_MIN_PANEL_WIDTH ||
+    rect.height <= 0 ||
+    rect.right <= 0 ||
+    rect.bottom <= 0 ||
+    rect.left >= window.innerWidth ||
+    rect.top >= window.innerHeight
+  ) {
+    return null;
   }
 
-  const rect = button.getBoundingClientRect();
+  const width = getElementRenderedWidth(button);
+  const height = getElementRenderedHeight(button);
+  const minLeft = Math.max(8, rect.left + MODE_BUTTON_PANEL_INSET);
+  const maxLeft = Math.max(minLeft, rect.right - width - MODE_BUTTON_PANEL_INSET);
+  const minBottom = Math.max(4, window.innerHeight - rect.bottom + MODE_BUTTON_BOTTOM_GAP);
+  const maxBottom = Math.max(minBottom, window.innerHeight - rect.top - height - MODE_BUTTON_BOTTOM_GAP);
+  const characterCounter = getCharacterCounterRect(protyle);
+  const counterWidth =
+    characterCounter && characterCounter.bottom > rect.bottom - 48
+      ? rect.right - characterCounter.left + MODE_BUTTON_PANEL_INSET
+      : MODE_BUTTON_RESERVED_STATUS_WIDTH;
+  const left = Math.min(rect.left + MODE_BUTTON_PANEL_INSET, maxLeft);
+  const bottom = minBottom;
 
-  if (rect.width <= 0 || rect.height <= 0) {
-    const left = Number.parseFloat(button.style.left);
-    const bottom = Number.parseFloat(button.style.bottom);
-
-    return {
-      left: Number.isFinite(left) ? left : 12,
-      bottom: Number.isFinite(bottom) ? bottom : getModeButtonBottomOffset(),
-    };
+  if (left + width + counterWidth > rect.right) {
+    return null;
   }
 
   return {
-    left: rect.left,
-    bottom: window.innerHeight - rect.bottom,
+    left,
+    bottom,
+    minLeft,
+    maxLeft,
+    minBottom,
+    maxBottom,
   };
 }
 
 function setFixedButtonPosition(button: HTMLElement, position: FixedButtonPosition) {
-  const width = button.offsetWidth || button.getBoundingClientRect().width || 0;
-  const height = button.offsetHeight || button.getBoundingClientRect().height || 0;
-  const maxLeft = Math.max(8, window.innerWidth - width - 8);
-  const maxBottom = Math.max(4, window.innerHeight - height - 4);
-  const left = Math.max(8, Math.min(Math.round(position.left), maxLeft));
-  const bottom = Math.max(4, Math.min(Math.round(position.bottom), maxBottom));
+  const width = getElementRenderedWidth(button);
+  const height = getElementRenderedHeight(button);
+  const minLeft = position.minLeft ?? 8;
+  const maxLeft = position.maxLeft ?? Math.max(minLeft, window.innerWidth - width - 8);
+  const minBottom = position.minBottom ?? 4;
+  const maxBottom = position.maxBottom ?? Math.max(minBottom, window.innerHeight - height - 4);
+  const left = Math.max(minLeft, Math.min(Math.round(position.left), maxLeft));
+  const bottom = Math.max(minBottom, Math.min(Math.round(position.bottom), maxBottom));
 
   button.style.left = `${left}px`;
   button.style.bottom = `${bottom}px`;
 }
 
-function getModeButtonBottomOffset(): number {
-  const probed = probeStatusBarFromViewportBottom();
+function getSourceEditorOutsideButtonPosition(
+  editorHost: HTMLElement | null | undefined,
+  button: HTMLElement,
+): FixedButtonPosition {
+  const viewportPosition = getViewportModeButtonPosition(button);
+  const content = editorHost?.querySelector<HTMLElement>(".cm-content");
+  const contentRect = content?.getBoundingClientRect();
 
-  if (probed !== null) {
-    return probed;
+  if (!contentRect || contentRect.width <= 0 || contentRect.height <= 0) {
+    return viewportPosition;
   }
 
+  const width = getElementRenderedWidth(button);
+  const height = getElementRenderedHeight(button);
+  const leftCandidate = contentRect.left - width - SOURCE_EXIT_BUTTON_GAP;
+  const bottom = Math.max(4, window.innerHeight - contentRect.bottom + MODE_BUTTON_BOTTOM_GAP);
+
+  if (leftCandidate >= 8) {
+    return {
+      left: leftCandidate,
+      bottom,
+      minLeft: 8,
+      maxLeft: Math.max(8, contentRect.left - width - SOURCE_EXIT_BUTTON_GAP),
+      minBottom: 4,
+      maxBottom: Math.max(4, window.innerHeight - height - 4),
+    };
+  }
+
+  const fallbackLeft = Math.min(contentRect.right + SOURCE_EXIT_BUTTON_GAP, window.innerWidth - width - 8);
+
+  return {
+    left: fallbackLeft,
+    bottom,
+    minLeft: Math.min(fallbackLeft, window.innerWidth - width - 8),
+    maxLeft: Math.max(8, window.innerWidth - width - 8),
+    minBottom: 4,
+    maxBottom: Math.max(4, window.innerHeight - height - 4),
+  };
+}
+
+function getViewportModeButtonPosition(button: HTMLElement): FixedButtonPosition {
+  const width = getElementRenderedWidth(button);
+  const height = getElementRenderedHeight(button);
+
+  return {
+    left: 12,
+    bottom: 4,
+    minLeft: 8,
+    maxLeft: Math.max(8, window.innerWidth - width - 8),
+    minBottom: 4,
+    maxBottom: Math.max(4, window.innerHeight - height - 4),
+  };
+}
+
+function getElementRenderedWidth(element: HTMLElement): number {
+  return element.offsetWidth || element.getBoundingClientRect().width || MODE_BUTTON_ESTIMATED_WIDTH;
+}
+
+function getElementRenderedHeight(element: HTMLElement): number {
+  return element.offsetHeight || element.getBoundingClientRect().height || MODE_BUTTON_ESTIMATED_HEIGHT;
+}
+
+function getCharacterCounterRect(protyle: HTMLElement): DOMRect | null {
   const selectors = [
-    "#status",
-    "#statusBar",
-    ".layout__status",
-    ".status-bar",
-    ".status",
+    ".protyle-breadcrumb__bar",
+    ".protyle-breadcrumb",
+    ".protyle-status",
+    ".protyle-counter",
   ];
 
   for (const selector of selectors) {
-    const candidate = document.querySelector<HTMLElement>(selector);
+    const element = protyle.querySelector<HTMLElement>(selector);
+    const rect = getVisibleElementRect(element);
 
-    if (!candidate || !isStatusBarLikeElement(candidate)) {
-      continue;
+    if (rect) {
+      return rect;
     }
-
-    const rect = candidate.getBoundingClientRect();
-    return Math.max(4, Math.round(window.innerHeight - rect.top + 4));
-  }
-
-  return 4;
-}
-
-function probeStatusBarFromViewportBottom(): number | null {
-  if (window.innerWidth <= 0 || window.innerHeight <= 0) {
-    return null;
-  }
-
-  const centerX = Math.floor(window.innerWidth / 2);
-  const probeY = window.innerHeight - 1;
-
-  if (typeof document.elementsFromPoint !== "function") {
-    return null;
-  }
-
-  const stack = document.elementsFromPoint(centerX, probeY);
-
-  for (const node of stack) {
-    if (!(node instanceof HTMLElement)) {
-      continue;
-    }
-
-    if (node.tagName === "HTML" || node.tagName === "BODY") {
-      continue;
-    }
-
-    if (
-      node.classList.contains(STATUS_BUTTON_CLASS) ||
-      node.classList.contains(EXIT_BUTTON_CLASS) ||
-      node.classList.contains(SAVE_STATUS_CLASS) ||
-      node.classList.contains(FULLSCREEN_CLASS) ||
-      node.closest(`.${FULLSCREEN_CLASS}`)
-    ) {
-      continue;
-    }
-
-    if (!isStatusBarLikeElement(node)) {
-      continue;
-    }
-
-    const rect = node.getBoundingClientRect();
-    return Math.max(4, Math.round(window.innerHeight - rect.top + 4));
   }
 
   return null;
 }
 
-const STATUS_BAR_MAX_HEIGHT = 64;
+function getVisibleElementRect(element: HTMLElement | null): DOMRect | null {
+  if (!element) {
+    return null;
+  }
 
-function isStatusBarLikeElement(element: HTMLElement): boolean {
   const rect = element.getBoundingClientRect();
-
-  if (rect.width <= 0 || rect.height <= 0) {
-    return false;
-  }
-
-  if (rect.bottom < window.innerHeight - 2 || rect.top > window.innerHeight) {
-    return false;
-  }
-
-  if (rect.width < window.innerWidth * 0.5) {
-    return false;
-  }
-
-  // Reject layout containers — anything taller than a realistic status bar is
-  // a wrapper that happens to reach the viewport bottom, not the bar itself.
-  if (rect.height > STATUS_BAR_MAX_HEIGHT) {
-    return false;
-  }
-
-  return true;
+  return rect.width > 0 && rect.height > 0 ? rect : null;
 }
 
 function setSourceEditorTextWidth(editorHost: HTMLElement, width: number | null) {
@@ -1751,7 +1784,11 @@ function setSourceEditorTextWidth(editorHost: HTMLElement, width: number | null)
 }
 
 function normalizeRenderedTextWidth(width: number | null): number | null {
-  return width && Number.isFinite(width) && width > 0 ? Math.round(width) : null;
+  if (!width || !Number.isFinite(width) || width <= 0) {
+    return SOURCE_EDITOR_DEFAULT_TEXT_WIDTH;
+  }
+
+  return Math.max(SOURCE_EDITOR_DEFAULT_TEXT_WIDTH, Math.round(width));
 }
 
 function getRenderedTextWidth(protyle: HTMLElement): number | null {

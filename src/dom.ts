@@ -17,6 +17,12 @@ type ApiLookupResult =
   | { status: "absent" };
 
 export function getActiveEditorContext(): ActiveEditorContext | null {
+  const focusedContext = getActiveEditorContextByFocusedDom();
+
+  if (focusedContext) {
+    return focusedContext;
+  }
+
   const apiResult = lookupActiveEditorContextByApi();
 
   if (apiResult.status === "ok") {
@@ -44,7 +50,7 @@ export function getEditorContextByDocId(docId: string): ActiveEditorContext | nu
   for (const protyle of document.querySelectorAll<HTMLElement>(".protyle:not(.fn__none)")) {
     const contextDocId = getDocIdFromProtyleElement(protyle);
 
-    if (contextDocId === docId && isVisibleElement(protyle)) {
+    if (contextDocId === docId && isVisibleProtyle(protyle)) {
       return { docId, protyle };
     }
   }
@@ -73,7 +79,7 @@ function lookupActiveEditorContextByApi(): ApiLookupResult {
     return { status: "absent" };
   }
 
-  if (!protyle || !isAttachedAndShown(protyle)) {
+  if (!protyle || !isVisibleProtyle(protyle)) {
     // API points at a doc whose protyle is not laid out yet.
     return { status: "pending" };
   }
@@ -170,6 +176,17 @@ function getActiveEditorContextByDom(): ActiveEditorContext | null {
   return docId ? { docId, protyle } : null;
 }
 
+function getActiveEditorContextByFocusedDom(): ActiveEditorContext | null {
+  const protyle = getFocusedProtyleByDom();
+
+  if (!protyle) {
+    return null;
+  }
+
+  const docId = getDocIdFromProtyleElement(protyle);
+  return docId ? { docId, protyle } : null;
+}
+
 function getDocIdFromProtyleElement(protyle: HTMLElement): string | null {
   return (
     protyle
@@ -233,6 +250,10 @@ function isVisibleProtyle(protyle: HTMLElement): boolean {
     return false;
   }
 
+  if (!isDocumentEditorProtyle(protyle)) {
+    return false;
+  }
+
   const rect = protyle.getBoundingClientRect();
   return (
     rect.width > 0 &&
@@ -250,6 +271,15 @@ function isAttachedAndShown(protyle: HTMLElement): boolean {
   }
 
   return isVisibleElement(protyle);
+}
+
+function isDocumentEditorProtyle(protyle: HTMLElement): boolean {
+  return !!(
+    protyle.querySelector(".protyle-wysiwyg") &&
+    (protyle.querySelector(".protyle-title[data-node-id]") ||
+      protyle.querySelector('[data-type="NodeDocument"][data-node-id]') ||
+      protyle.getAttribute("data-id"))
+  );
 }
 
 function isVisibleElement(element: HTMLElement): boolean {
