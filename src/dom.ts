@@ -11,8 +11,27 @@ export interface ReloadableEditor {
   reload(focus: boolean): void;
 }
 
+type ApiLookupResult =
+  | { status: "ok"; context: ActiveEditorContext }
+  | { status: "pending" }
+  | { status: "absent" };
+
 export function getActiveEditorContext(): ActiveEditorContext | null {
-  return getActiveEditorContextByApi() ?? getActiveEditorContextByDom();
+  const apiResult = lookupActiveEditorContextByApi();
+
+  if (apiResult.status === "ok") {
+    return apiResult.context;
+  }
+
+  // SiYuan's API knows about a target document, but its protyle isn't
+  // attached/visible yet (e.g., mid doc-switch). Returning a stale DOM
+  // match here would point the UI at the previous document; instead let
+  // the eventBus/focus listeners retry once the new protyle is mounted.
+  if (apiResult.status === "pending") {
+    return null;
+  }
+
+  return getActiveEditorContextByDom();
 }
 
 export function getEditorContextByDocId(docId: string): ActiveEditorContext | null {
@@ -33,29 +52,41 @@ export function getEditorContextByDocId(docId: string): ActiveEditorContext | nu
   return null;
 }
 
-function getActiveEditorContextByApi(): ActiveEditorContext | null {
+function lookupActiveEditorContextByApi(): ApiLookupResult {
   let editor: unknown;
 
   try {
     editor = getActiveEditor();
   } catch {
-    return null;
+    return { status: "absent" };
+  }
+
+  if (editor === null || editor === undefined) {
+    return { status: "absent" };
   }
 
   const protyleInstance = getPossibleProtyleInstance(editor);
   const docId = getDocIdFromProtyleInstance(protyleInstance);
   const protyle = getProtyleElementFromInstance(protyleInstance);
 
-  if (docId && protyle) {
-    return {
+  if (!docId) {
+    return { status: "absent" };
+  }
+
+  if (!protyle || !isAttachedAndShown(protyle)) {
+    // API points at a doc whose protyle is not laid out yet.
+    return { status: "pending" };
+  }
+
+  return {
+    status: "ok",
+    context: {
       docId,
       protyle,
       editor: getReloadableEditor(editor),
       disabled: getProtyleDisabledFromInstance(protyleInstance),
-    };
-  }
-
-  return null;
+    },
+  };
 }
 
 function getProtyleDisabledFromInstance(
@@ -152,6 +183,12 @@ function getDocIdFromProtyleElement(protyle: HTMLElement): string | null {
 }
 
 function getActiveProtyleByDom(): HTMLElement | null {
+  const focusedProtyle = getFocusedProtyleByDom();
+
+  if (focusedProtyle) {
+    return focusedProtyle;
+  }
+
   const candidates = [
     ".layout__wnd--active .protyle:not(.fn__none)",
     ".layout-tab-container .protyle:not(.fn__none)",
@@ -160,7 +197,7 @@ function getActiveProtyleByDom(): HTMLElement | null {
 
   for (const selector of candidates) {
     const protyles = Array.from(document.querySelectorAll<HTMLElement>(selector));
-    const visibleProtyle = protyles.find(isVisibleElement);
+    const visibleProtyle = protyles.find(isVisibleProtyle);
 
     if (visibleProtyle) {
       return visibleProtyle;
@@ -168,6 +205,51 @@ function getActiveProtyleByDom(): HTMLElement | null {
   }
 
   return null;
+}
+
+function getFocusedProtyleByDom(): HTMLElement | null {
+  const activeElement = document.activeElement;
+  const focusedProtyle =
+    activeElement instanceof Element
+      ? activeElement.closest<HTMLElement>(".protyle:not(.fn__none)")
+      : null;
+
+  if (focusedProtyle && isVisibleProtyle(focusedProtyle)) {
+    return focusedProtyle;
+  }
+
+  const selection = document.getSelection();
+  const selectionElement =
+    selection?.anchorNode instanceof Element
+      ? selection.anchorNode
+      : selection?.anchorNode?.parentElement ?? null;
+  const selectedProtyle = selectionElement?.closest<HTMLElement>(".protyle:not(.fn__none)");
+
+  return selectedProtyle && isVisibleProtyle(selectedProtyle) ? selectedProtyle : null;
+}
+
+function isVisibleProtyle(protyle: HTMLElement): boolean {
+  if (!isAttachedAndShown(protyle)) {
+    return false;
+  }
+
+  const rect = protyle.getBoundingClientRect();
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.right > 0 &&
+    rect.bottom > 0 &&
+    rect.left < window.innerWidth &&
+    rect.top < window.innerHeight
+  );
+}
+
+function isAttachedAndShown(protyle: HTMLElement): boolean {
+  if (!document.body.contains(protyle) || protyle.classList.contains("fn__none")) {
+    return false;
+  }
+
+  return isVisibleElement(protyle);
 }
 
 function isVisibleElement(element: HTMLElement): boolean {

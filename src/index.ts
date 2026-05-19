@@ -47,7 +47,7 @@ const PREPARING_CLASS = "is-preparing";
 const RENDERED_TEXT_WIDTH_PROPERTY = "--markdown-edit-mode-rendered-text-width";
 const REALTIME_SAVE_DELAY = 1000;
 const LEGACY_DRAFT_STORAGE_PREFIX = "siyuan-plugin-markdown-edit-mode:source-draft:v1:";
-const PENDING_CURSOR_HINT_MAX_AGE = 1500;
+const PENDING_CURSOR_HINT_MAX_AGE = 600;
 const RENDERED_CURSOR_HINT_CACHE_MAX_AGE = 10000;
 const RELOAD_RESTORE_TIMEOUT_MS = 6000;
 const RELOAD_RESTORE_DEBOUNCE_MS = 80;
@@ -146,6 +146,8 @@ export default class MarkdownEditModePlugin extends Plugin {
   private ctrlTapArmed = false;
   private ctrlTapHadOtherKey = false;
   private lastCtrlTapAt = 0;
+  private statusButtonClickGate = createClickSuppressionGate();
+  private exitButtonClickGate = createClickSuppressionGate();
 
   private t(key: I18nKey, params: I18nParams = {}): string {
     const value = this.i18n?.[key];
@@ -166,8 +168,13 @@ export default class MarkdownEditModePlugin extends Plugin {
     window.addEventListener("resize", this.windowResizeHandler, true);
     window.addEventListener("scroll", this.positionStatusButton, true);
     window.addEventListener("pointerdown", this.positionStatusButton, true);
+    window.addEventListener("focusin", this.positionStatusButton, true);
     window.addEventListener("beforeunload", this.beforeUnloadHandler, true);
     window.addEventListener("pagehide", this.beforeUnloadHandler, true);
+
+    this.eventBus.on("switch-protyle", this.protyleSwitchHandler);
+    this.eventBus.on("loaded-protyle-static", this.protyleSwitchHandler);
+    this.eventBus.on("switch-protyle-mode", this.protyleSwitchHandler);
   }
 
   onLayoutReady() {
@@ -184,8 +191,14 @@ export default class MarkdownEditModePlugin extends Plugin {
     window.removeEventListener("resize", this.windowResizeHandler, true);
     window.removeEventListener("scroll", this.positionStatusButton, true);
     window.removeEventListener("pointerdown", this.positionStatusButton, true);
+    window.removeEventListener("focusin", this.positionStatusButton, true);
     window.removeEventListener("beforeunload", this.beforeUnloadHandler, true);
     window.removeEventListener("pagehide", this.beforeUnloadHandler, true);
+
+    this.eventBus.off("switch-protyle", this.protyleSwitchHandler);
+    this.eventBus.off("loaded-protyle-static", this.protyleSwitchHandler);
+    this.eventBus.off("switch-protyle-mode", this.protyleSwitchHandler);
+
     void this.flushRealtimeSave();
     this.cleanupReloadRestore();
     this.cleanupSourceMode();
@@ -202,6 +215,7 @@ export default class MarkdownEditModePlugin extends Plugin {
 
     const button = document.createElement("button");
     button.className = STATUS_BUTTON_CLASS;
+    button.classList.add("is-hidden");
     button.type = "button";
     button.tabIndex = -1;
     setModeButtonContent(button, this.t("buttonEnterSourceMode"));
@@ -219,6 +233,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     };
 
     button.addEventListener("pointerdown", (event) => {
+      this.statusButtonClickGate.clear();
       preventModeButtonFocus(event);
       captureCursor();
     });
@@ -226,6 +241,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     button.addEventListener(
       "touchstart",
       (event) => {
+        this.statusButtonClickGate.clear();
         preventModeButtonFocus(event);
         captureCursor();
       },
@@ -235,13 +251,14 @@ export default class MarkdownEditModePlugin extends Plugin {
       "touchend",
       (event) => {
         preventModeButtonFocus(event);
+        this.statusButtonClickGate.suppress();
         void this.toggleSourceMode();
       },
       { passive: false },
     );
     button.addEventListener("click", (event) => {
       preventModeButtonFocus(event);
-      void this.toggleSourceMode();
+      void this.toggleSourceModeFromButton();
     });
 
     this.statusButton = button;
@@ -260,6 +277,22 @@ export default class MarkdownEditModePlugin extends Plugin {
     }
 
     await this.enterSourceMode();
+  }
+
+  private async toggleSourceModeFromButton() {
+    if (this.statusButtonClickGate.consume()) {
+      return;
+    }
+
+    await this.toggleSourceMode();
+  }
+
+  private async exitSourceModeFromButton() {
+    if (this.exitButtonClickGate.consume()) {
+      return;
+    }
+
+    await this.exitSourceMode(true);
   }
 
   private async enterSourceMode() {
@@ -355,13 +388,13 @@ export default class MarkdownEditModePlugin extends Plugin {
     setModeButtonContent(exitButton, this.t("buttonExitSourceMode"));
     exitButton.title = this.t("titleSaveAndExitSourceMode");
     exitButton.setAttribute("aria-label", this.t("titleSaveAndExitSourceMode"));
-    exitButton.style.left = this.statusButton?.style.left || "12px";
     const rememberCursor = () => this.rememberSourceCursor(editor);
     const exit = () => {
-      void this.exitSourceMode(true);
+      void this.exitSourceModeFromButton();
     };
 
     exitButton.addEventListener("pointerdown", (event) => {
+      this.exitButtonClickGate.clear();
       preventModeButtonFocus(event);
       rememberCursor();
     });
@@ -369,6 +402,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     exitButton.addEventListener(
       "touchstart",
       (event) => {
+        this.exitButtonClickGate.clear();
         preventModeButtonFocus(event);
         rememberCursor();
       },
@@ -378,7 +412,8 @@ export default class MarkdownEditModePlugin extends Plugin {
       "touchend",
       (event) => {
         preventModeButtonFocus(event);
-        exit();
+        this.exitButtonClickGate.suppress();
+        void this.exitSourceMode(true);
       },
       { passive: false },
     );
@@ -397,6 +432,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     fullscreen.appendChild(exitButton);
     fullscreen.appendChild(saveStatus);
     document.body.appendChild(fullscreen);
+    setFixedButtonPosition(exitButton, getFixedButtonPosition(this.statusButton));
 
     const editor = new EditorView({
       parent: editorHost,
@@ -767,7 +803,14 @@ export default class MarkdownEditModePlugin extends Plugin {
     );
     this.statusButton.setAttribute("aria-pressed", String(active));
     this.statusButton.classList.toggle("is-active", active);
-    this.statusButton.classList.toggle("is-hidden", active);
+
+    if (active) {
+      this.statusButton.classList.add("is-hidden");
+    }
+
+    if (!active) {
+      this.positionStatusButton();
+    }
   }
 
   private updateButtonsBusy(busy: boolean) {
@@ -801,27 +844,60 @@ export default class MarkdownEditModePlugin extends Plugin {
 
     this.statusButtonFrameId = window.requestAnimationFrame(() => {
       this.statusButtonFrameId = null;
+
+      if (this.isSourceMode) {
+        return;
+      }
+
       const context = getActiveEditorContext();
       const rect = context?.protyle.getBoundingClientRect();
 
       if (!rect || rect.width <= 0 || rect.height <= 0) {
-        button.style.left = "12px";
-        button.style.bottom = "4px";
+        button.classList.add("is-hidden");
         return;
       }
 
-      button.style.left = `${Math.max(8, Math.round(rect.left + 8))}px`;
-      button.style.bottom = "4px";
+      button.classList.remove("is-hidden");
+      setFixedButtonPosition(button, {
+        left: rect.left + 8,
+        bottom: getModeButtonBottomOffset(),
+      });
     });
   };
 
   private windowResizeHandler = () => {
     if (this.isSourceMode) {
       this.scheduleSourceEditorWidthSync();
+      this.scheduleExitButtonReposition();
       return;
     }
 
     this.positionStatusButton();
+  };
+
+  private scheduleExitButtonReposition = () => {
+    const fullscreen = this.fullscreenElement;
+    if (!fullscreen) {
+      return;
+    }
+
+    const exitButton = fullscreen.querySelector<HTMLElement>(`.${EXIT_BUTTON_CLASS}`);
+    if (!exitButton) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      if (!this.isSourceMode || this.fullscreenElement !== fullscreen) {
+        return;
+      }
+
+      const left = Number.parseFloat(exitButton.style.left);
+      const bottom = getModeButtonBottomOffset();
+      setFixedButtonPosition(exitButton, {
+        left: Number.isFinite(left) ? left : 12,
+        bottom,
+      });
+    });
   };
 
   private scheduleSourceEditorWidthSync = () => {
@@ -1358,6 +1434,7 @@ export default class MarkdownEditModePlugin extends Plugin {
 
     if (isDoubleTap) {
       this.lastCtrlTapAt = 0;
+      this.pendingCursorHint = null;
       event.preventDefault();
       await this.toggleSourceMode();
     }
@@ -1399,6 +1476,14 @@ export default class MarkdownEditModePlugin extends Plugin {
 
   private beforeUnloadHandler = () => {
     void this.flushRealtimeSave();
+  };
+
+  private protyleSwitchHandler = () => {
+    if (this.isSourceMode) {
+      return;
+    }
+
+    this.positionStatusButton();
   };
 }
 
@@ -1486,6 +1571,174 @@ function isSupportedFrontend(): boolean {
 function preventModeButtonFocus(event: Event) {
   event.preventDefault();
   event.stopPropagation();
+}
+
+interface ClickSuppressionGate {
+  suppress(): void;
+  clear(): void;
+  consume(): boolean;
+}
+
+function createClickSuppressionGate(): ClickSuppressionGate {
+  let suppressUntil = 0;
+  return {
+    suppress() {
+      suppressUntil = Date.now() + 700;
+    },
+    clear() {
+      suppressUntil = 0;
+    },
+    consume() {
+      const now = Date.now();
+      if (now <= suppressUntil) {
+        suppressUntil = 0;
+        return true;
+      }
+      return false;
+    },
+  };
+}
+
+interface FixedButtonPosition {
+  left: number;
+  bottom: number;
+}
+
+function getFixedButtonPosition(button: HTMLElement | null): FixedButtonPosition {
+  if (!button) {
+    return {
+      left: 12,
+      bottom: getModeButtonBottomOffset(),
+    };
+  }
+
+  const rect = button.getBoundingClientRect();
+
+  if (rect.width <= 0 || rect.height <= 0) {
+    const left = Number.parseFloat(button.style.left);
+    const bottom = Number.parseFloat(button.style.bottom);
+
+    return {
+      left: Number.isFinite(left) ? left : 12,
+      bottom: Number.isFinite(bottom) ? bottom : getModeButtonBottomOffset(),
+    };
+  }
+
+  return {
+    left: rect.left,
+    bottom: window.innerHeight - rect.bottom,
+  };
+}
+
+function setFixedButtonPosition(button: HTMLElement, position: FixedButtonPosition) {
+  const width = button.offsetWidth || button.getBoundingClientRect().width || 0;
+  const height = button.offsetHeight || button.getBoundingClientRect().height || 0;
+  const maxLeft = Math.max(8, window.innerWidth - width - 8);
+  const maxBottom = Math.max(4, window.innerHeight - height - 4);
+  const left = Math.max(8, Math.min(Math.round(position.left), maxLeft));
+  const bottom = Math.max(4, Math.min(Math.round(position.bottom), maxBottom));
+
+  button.style.left = `${left}px`;
+  button.style.bottom = `${bottom}px`;
+}
+
+function getModeButtonBottomOffset(): number {
+  const probed = probeStatusBarFromViewportBottom();
+
+  if (probed !== null) {
+    return probed;
+  }
+
+  const selectors = [
+    "#status",
+    "#statusBar",
+    ".layout__status",
+    ".status-bar",
+    ".status",
+  ];
+
+  for (const selector of selectors) {
+    const candidate = document.querySelector<HTMLElement>(selector);
+
+    if (!candidate || !isStatusBarLikeElement(candidate)) {
+      continue;
+    }
+
+    const rect = candidate.getBoundingClientRect();
+    return Math.max(4, Math.round(window.innerHeight - rect.top + 4));
+  }
+
+  return 4;
+}
+
+function probeStatusBarFromViewportBottom(): number | null {
+  if (window.innerWidth <= 0 || window.innerHeight <= 0) {
+    return null;
+  }
+
+  const centerX = Math.floor(window.innerWidth / 2);
+  const probeY = window.innerHeight - 1;
+
+  if (typeof document.elementsFromPoint !== "function") {
+    return null;
+  }
+
+  const stack = document.elementsFromPoint(centerX, probeY);
+
+  for (const node of stack) {
+    if (!(node instanceof HTMLElement)) {
+      continue;
+    }
+
+    if (node.tagName === "HTML" || node.tagName === "BODY") {
+      continue;
+    }
+
+    if (
+      node.classList.contains(STATUS_BUTTON_CLASS) ||
+      node.classList.contains(EXIT_BUTTON_CLASS) ||
+      node.classList.contains(SAVE_STATUS_CLASS) ||
+      node.classList.contains(FULLSCREEN_CLASS) ||
+      node.closest(`.${FULLSCREEN_CLASS}`)
+    ) {
+      continue;
+    }
+
+    if (!isStatusBarLikeElement(node)) {
+      continue;
+    }
+
+    const rect = node.getBoundingClientRect();
+    return Math.max(4, Math.round(window.innerHeight - rect.top + 4));
+  }
+
+  return null;
+}
+
+const STATUS_BAR_MAX_HEIGHT = 64;
+
+function isStatusBarLikeElement(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+
+  if (rect.width <= 0 || rect.height <= 0) {
+    return false;
+  }
+
+  if (rect.bottom < window.innerHeight - 2 || rect.top > window.innerHeight) {
+    return false;
+  }
+
+  if (rect.width < window.innerWidth * 0.5) {
+    return false;
+  }
+
+  // Reject layout containers — anything taller than a realistic status bar is
+  // a wrapper that happens to reach the viewport bottom, not the bar itself.
+  if (rect.height > STATUS_BAR_MAX_HEIGHT) {
+    return false;
+  }
+
+  return true;
 }
 
 function setSourceEditorTextWidth(editorHost: HTMLElement, width: number | null) {
