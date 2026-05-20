@@ -902,8 +902,7 @@ export default class MarkdownEditModePlugin extends Plugin {
   };
 
   private positionExitButton(exitButton: HTMLElement) {
-    const editorHost = this.fullscreenElement?.querySelector<HTMLElement>(`.${EDITOR_CLASS}`);
-    const position = getSourceEditorOutsideButtonPosition(editorHost, exitButton);
+    const position = getViewportModeButtonPosition(exitButton);
 
     setFixedButtonPosition(exitButton, position);
   }
@@ -1622,7 +1621,6 @@ const MODE_BUTTON_BOTTOM_GAP = 4;
 const MODE_BUTTON_ESTIMATED_WIDTH = 88;
 const MODE_BUTTON_ESTIMATED_HEIGHT = 24;
 const MODE_BUTTON_RESERVED_STATUS_WIDTH = 150;
-const SOURCE_EXIT_BUTTON_GAP = 8;
 
 function getPanelModeButtonPosition(
   protyle: HTMLElement,
@@ -1681,46 +1679,6 @@ function setFixedButtonPosition(button: HTMLElement, position: FixedButtonPositi
 
   button.style.left = `${left}px`;
   button.style.bottom = `${bottom}px`;
-}
-
-function getSourceEditorOutsideButtonPosition(
-  editorHost: HTMLElement | null | undefined,
-  button: HTMLElement,
-): FixedButtonPosition {
-  const viewportPosition = getViewportModeButtonPosition(button);
-  const content = editorHost?.querySelector<HTMLElement>(".cm-content");
-  const contentRect = content?.getBoundingClientRect();
-
-  if (!contentRect || contentRect.width <= 0 || contentRect.height <= 0) {
-    return viewportPosition;
-  }
-
-  const width = getElementRenderedWidth(button);
-  const height = getElementRenderedHeight(button);
-  const leftCandidate = contentRect.left - width - SOURCE_EXIT_BUTTON_GAP;
-  const bottom = Math.max(4, window.innerHeight - contentRect.bottom + MODE_BUTTON_BOTTOM_GAP);
-
-  if (leftCandidate >= 8) {
-    return {
-      left: leftCandidate,
-      bottom,
-      minLeft: 8,
-      maxLeft: Math.max(8, contentRect.left - width - SOURCE_EXIT_BUTTON_GAP),
-      minBottom: 4,
-      maxBottom: Math.max(4, window.innerHeight - height - 4),
-    };
-  }
-
-  const fallbackLeft = Math.min(contentRect.right + SOURCE_EXIT_BUTTON_GAP, window.innerWidth - width - 8);
-
-  return {
-    left: fallbackLeft,
-    bottom,
-    minLeft: Math.min(fallbackLeft, window.innerWidth - width - 8),
-    maxLeft: Math.max(8, window.innerWidth - width - 8),
-    minBottom: 4,
-    maxBottom: Math.max(4, window.innerHeight - height - 4),
-  };
 }
 
 function getViewportModeButtonPosition(button: HTMLElement): FixedButtonPosition {

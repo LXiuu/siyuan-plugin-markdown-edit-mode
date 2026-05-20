@@ -1,5 +1,12 @@
 .markdown-edit-mode-status-btn,
 .markdown-edit-mode-exit-btn {
+  --markdown-edit-mode-button-background: var(--b3-theme-background, #ffffff);
+  --markdown-edit-mode-button-hover-background: color-mix(
+    in srgb,
+    var(--b3-theme-background, #ffffff) 92%,
+    var(--b3-theme-on-background, #000000)
+  );
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -11,7 +18,7 @@
   padding: 0 8px;
   border: none;
   border-radius: var(--Sv-status-radius, 6px);
-  background: var(--Sv-status-msg-background, var(--b3-theme-background, #ffffff));
+  background: var(--markdown-edit-mode-button-background);
   color: var(--Sv-fixed-item-text, var(--b3-theme-on-surface));
   box-shadow: none;
   cursor: pointer;
@@ -64,7 +71,8 @@
 
 .markdown-edit-mode-status-btn:hover,
 .markdown-edit-mode-exit-btn:hover {
-  background: var(--Sv-status-item-hover, var(--b3-list-hover, rgba(0, 0, 0, 0.06)));
+  background: var(--b3-theme-background, #ffffff);
+  background: var(--markdown-edit-mode-button-hover-background);
   color: var(--b3-theme-on-background);
 }
 
@@ -76,7 +84,7 @@
 
 .markdown-edit-mode-status-btn.is-active {
   color: var(--Sv-fixed-item-text, var(--b3-theme-on-surface));
-  background: var(--Sv-status-msg-background, var(--b3-theme-background, #ffffff));
+  background: var(--markdown-edit-mode-button-background);
 }
 
 .markdown-edit-mode-status-btn.is-hidden {
