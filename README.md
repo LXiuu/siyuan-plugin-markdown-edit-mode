@@ -53,6 +53,12 @@ Status messages:
 
 ## Changelog
 
+### v0.1.5
+
+- Avoided stale editor context during document switches.
+- Canceled pending reload and cursor-restore work when switching documents.
+- Compressed the preview image without changing its resolution.
+
 ### v0.1.4
 
 - Improved the source-mode button in split views so it follows the document area currently being edited.
