@@ -1490,6 +1490,10 @@ export default class MarkdownEditModePlugin extends Plugin {
       return;
     }
 
+    this.cleanupReloadRestore();
+    this.operationGeneration += 1;
+    this.isRestoringRenderedCursor = false;
+    this.updateButtonsBusy(false);
     this.positionStatusButton();
   };
 }

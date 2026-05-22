@@ -18,14 +18,16 @@ type ApiLookupResult =
 
 export function getActiveEditorContext(): ActiveEditorContext | null {
   const focusedContext = getActiveEditorContextByFocusedDom();
-
-  if (focusedContext) {
-    return focusedContext;
-  }
-
   const apiResult = lookupActiveEditorContextByApi();
 
   if (apiResult.status === "ok") {
+    if (focusedContext?.docId === apiResult.context.docId) {
+      return {
+        ...apiResult.context,
+        protyle: focusedContext.protyle,
+      };
+    }
+
     return apiResult.context;
   }
 
@@ -35,6 +37,10 @@ export function getActiveEditorContext(): ActiveEditorContext | null {
   // the eventBus/focus listeners retry once the new protyle is mounted.
   if (apiResult.status === "pending") {
     return null;
+  }
+
+  if (focusedContext) {
+    return focusedContext;
   }
 
   return getActiveEditorContextByDom();
