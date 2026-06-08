@@ -1,6 +1,10 @@
 import { fetchSyncPost } from "siyuan";
 
-import { normalizeMarkdownForSave, normalizeSiyuanExportMarkdown } from "./markdown";
+import {
+  normalizeMarkdownForSave,
+  normalizeSiyuanExportMarkdown,
+  preserveBlankParagraphsForSiyuanSave,
+} from "./markdown";
 
 interface SiyuanApiResponse<T = unknown> {
   code: number;
@@ -63,7 +67,7 @@ export async function updateBlockByMarkdown(
   const response = (await fetchSyncPost("/api/block/updateBlock", {
     id: docId,
     dataType: "markdown",
-    data: normalized.markdown,
+    data: preserveBlankParagraphsForSiyuanSave(normalized.markdown),
   })) as SiyuanApiResponse;
 
   assertSuccessfulResponse(response, options.fallbackMessage ?? "Failed to save Markdown");

@@ -9,6 +9,7 @@ export interface NormalizeSiyuanExportMarkdownOptions {
 }
 
 const SIYUAN_FRONT_MATTER_KEYS = new Set(["title", "date", "lastmod"]);
+const SIYUAN_EMPTY_PARAGRAPH_MARKER = "\u200D";
 
 export function normalizeSiyuanExportMarkdown(
   markdown: string,
@@ -43,6 +44,45 @@ export function normalizeMarkdownForSave(markdown: string): string {
     .replace(/\r\n?/g, "\n")
     .replace(/\u00A0/g, " ")
     .replace(/[\u200B-\u200D\uFEFF]/g, "");
+}
+
+export function preserveBlankParagraphsForSiyuanSave(markdown: string): string {
+  const normalized = normalizeMarkdownForSave(markdown);
+
+  if (!normalized.trim()) {
+    return normalized.length > 0 ? SIYUAN_EMPTY_PARAGRAPH_MARKER : normalized;
+  }
+
+  const lines = normalized.split("\n");
+  const result: string[] = [];
+  let activeFence: string | null = null;
+
+  for (let index = 0; index < lines.length; ) {
+    if (activeFence && isBlankMarkdownLine(lines[index] ?? "")) {
+      result.push(lines[index] ?? "");
+      index += 1;
+      continue;
+    }
+
+    if (!isBlankMarkdownLine(lines[index] ?? "")) {
+      const line = lines[index] ?? "";
+
+      result.push(line);
+      activeFence = getNextFenceState(line, activeFence);
+      index += 1;
+      continue;
+    }
+
+    const runStart = index;
+
+    while (index < lines.length && isBlankMarkdownLine(lines[index] ?? "")) {
+      index += 1;
+    }
+
+    result.push(...createBlankRunSaveLines(lines, runStart, index, normalized.endsWith("\n")));
+  }
+
+  return result.join("\n");
 }
 
 export function normalizePastedMarkdown(markdown: string): string {
@@ -85,6 +125,105 @@ function dedentLikelyMarkdown(markdown: string): string {
 
 function looksLikeMarkdown(markdown: string): boolean {
   return /(^|\n)\s{0,3}(#{1,6}\s|[-+*]\s|\d+\.\s|>\s|```|~~~|\|.+\|)/.test(markdown);
+}
+
+function createBlankRunSaveLines(
+  lines: string[],
+  runStart: number,
+  runEnd: number,
+  endsWithNewline: boolean,
+): string[] {
+  const runLength = runEnd - runStart;
+  const hasPreviousContent = runStart > 0;
+  const hasNextContent = runEnd < lines.length;
+  const hasExplicitWhitespaceLine = lines
+    .slice(runStart, runEnd)
+    .some((line) => line.length > 0);
+
+  if (hasPreviousContent && hasNextContent) {
+    const markerCount = Math.max(
+      hasExplicitWhitespaceLine ? 1 : 0,
+      Math.ceil((runLength - 1) / 2),
+    );
+
+    return createSeparatedEmptyParagraphLines(markerCount, {
+      leadingSeparator: true,
+      trailingSeparator: true,
+    });
+  }
+
+  if (hasNextContent) {
+    return createSeparatedEmptyParagraphLines(Math.ceil(runLength / 2), {
+      leadingSeparator: false,
+      trailingSeparator: true,
+    });
+  }
+
+  if (hasPreviousContent) {
+    const trailingLineBreakOnly = endsWithNewline ? 1 : 0;
+    const markerCount = Math.ceil(Math.max(0, runLength - trailingLineBreakOnly) / 2);
+
+    return createSeparatedEmptyParagraphLines(markerCount, {
+      leadingSeparator: true,
+      trailingSeparator: false,
+    });
+  }
+
+  return createSeparatedEmptyParagraphLines(Math.ceil(runLength / 2), {
+    leadingSeparator: false,
+    trailingSeparator: false,
+  });
+}
+
+function createSeparatedEmptyParagraphLines(
+  markerCount: number,
+  options: { leadingSeparator: boolean; trailingSeparator: boolean },
+): string[] {
+  if (markerCount <= 0) {
+    return options.leadingSeparator || options.trailingSeparator ? [""] : [];
+  }
+
+  const lines: string[] = [];
+
+  if (options.leadingSeparator) {
+    lines.push("");
+  }
+
+  for (let index = 0; index < markerCount; index += 1) {
+    if (index > 0) {
+      lines.push("");
+    }
+
+    lines.push(SIYUAN_EMPTY_PARAGRAPH_MARKER);
+  }
+
+  if (options.trailingSeparator) {
+    lines.push("");
+  }
+
+  return lines;
+}
+
+function isBlankMarkdownLine(line: string): boolean {
+  return line.trim().length === 0;
+}
+
+function getNextFenceState(line: string, activeFence: string | null): string | null {
+  const match = line.match(/^[ \t]*(`{3,}|~{3,})/);
+
+  if (!match) {
+    return activeFence;
+  }
+
+  const fence = match[1] ?? "";
+
+  if (!activeFence) {
+    return fence;
+  }
+
+  return fence[0] === activeFence[0] && fence.length >= activeFence.length
+    ? null
+    : activeFence;
 }
 
 function removeOneSiyuanFrontMatter(markdown: string): {
