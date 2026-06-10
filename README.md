@@ -53,6 +53,11 @@ Status messages:
 
 ## Changelog
 
+### v0.1.6
+
+- Fixed extra blank lines and whitespace-only lines being removed after source-mode saves.
+- Preserves intentional empty paragraphs before writing Markdown back to SiYuan while leaving normal Markdown paragraph separators and fenced-code blank lines unchanged.
+
 ### v0.1.5
 
 - Avoided stale editor context during document switches.
