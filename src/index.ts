@@ -43,6 +43,7 @@ const EXIT_BUTTON_CLASS = "markdown-edit-mode-exit-btn";
 const SAVE_STATUS_CLASS = "markdown-edit-mode-save-status";
 const BUTTON_ICON_CLASS = "markdown-edit-mode-btn-icon";
 const BUTTON_LABEL_CLASS = "markdown-edit-mode-btn-label";
+const SOURCE_ACTIVE_BODY_CLASS = "markdown-edit-mode-source-active";
 const PREPARING_CLASS = "is-preparing";
 const RENDERED_TEXT_WIDTH_PROPERTY = "--markdown-edit-mode-rendered-text-width";
 const REALTIME_SAVE_DELAY = 1000;
@@ -437,6 +438,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     fullscreen.appendChild(exitButton);
     fullscreen.appendChild(saveStatus);
     document.body.appendChild(fullscreen);
+    document.body.classList.add(SOURCE_ACTIVE_BODY_CLASS);
 
     const editor = new EditorView({
       parent: editorHost,
@@ -716,6 +718,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.saveStatusElement = null;
     this.fullscreenElement?.remove();
     this.fullscreenElement = null;
+    document.body.classList.remove(SOURCE_ACTIVE_BODY_CLASS);
 
     this.isSourceMode = false;
     this.isEntering = false;

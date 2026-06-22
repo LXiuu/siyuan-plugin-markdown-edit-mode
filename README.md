@@ -53,6 +53,11 @@ Status messages:
 
 ## Changelog
 
+### v0.1.7
+
+- Fixed plugin-wide SiYuan layer overrides that caused the Settings > Editor > Font dropdown to be hidden behind the settings dialog.
+- Scoped source-mode layer adjustments so they only apply while source mode is open, avoiding interference with other SiYuan UI.
+
 ### v0.1.6
 
 - Fixed extra blank lines and whitespace-only lines being removed after source-mode saves.

@@ -112,26 +112,29 @@
   pointer-events: none;
 }
 
-.b3-snackbars {
+.markdown-edit-mode-source-active .b3-snackbars {
   position: fixed !important;
   z-index: 5000 !important;
 }
 
-.b3-snackbars .b3-snackbar,
-.b3-snackbar {
+.markdown-edit-mode-source-active .b3-snackbars .b3-snackbar,
+.markdown-edit-mode-source-active .b3-snackbar {
   position: relative;
   z-index: 5001 !important;
 }
 
-.b3-dialog,
-.b3-menu,
-.block__popover,
-.layout__resize--lr,
-.layout__resize--tb,
-[data-key="dialog"],
-[data-type="dialog"],
-[data-type="menu"] {
+.markdown-edit-mode-source-active .b3-dialog,
+.markdown-edit-mode-source-active .layout__resize--lr,
+.markdown-edit-mode-source-active .layout__resize--tb,
+.markdown-edit-mode-source-active [data-key="dialog"],
+.markdown-edit-mode-source-active [data-type="dialog"] {
   z-index: 3000 !important;
+}
+
+.markdown-edit-mode-source-active .b3-menu,
+.markdown-edit-mode-source-active .block__popover,
+.markdown-edit-mode-source-active [data-type="menu"] {
+  z-index: 3001 !important;
 }
 
 .markdown-edit-mode-editor {
