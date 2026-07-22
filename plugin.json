@@ -2,7 +2,7 @@
   "name": "siyuan-plugin-markdown-edit-mode",
   "author": "LXiuu",
   "url": "https://github.com/LXiuu/siyuan-plugin-markdown-edit-mode",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "minAppVersion": "3.3.0",
   "backends": [
     "all"

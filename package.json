@@ -1,6 +1,6 @@
 {
   "name": "siyuan-plugin-markdown-edit-mode",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Markdown source edit mode plugin for SiYuan.",
   "type": "module",
   "main": "index.js",
@@ -17,6 +17,7 @@
     "dev": "vite build --watch",
     "build": "vite build",
     "package": "npm run build && node scripts/package.mjs",
+    "test": "tsx --test tests/siyuan-source.test.ts tests/siyuan-protection.test.ts tests/siyuan-container.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -30,6 +31,7 @@
     "@types/node": "^20.12.12",
     "jszip": "^3.10.1",
     "siyuan": "^1.2.1",
+    "tsx": "^4.23.1",
     "typescript": "^5.4.5",
     "vite": "^8.0.11"
   },

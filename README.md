@@ -2,35 +2,33 @@
 
 A lightweight SiYuan plugin that temporarily switches the current document into a Markdown source editor.
 
-This version supports desktop frontends only: `desktop`, `browser-desktop`, and `desktop-window`.
+This version supports SiYuan on desktop. Phones and tablets are not supported.
 
-The plugin adds a source-mode button near the lower-left corner of the active document. Click it to open a full-screen Markdown source editor, edit the document as plain Markdown, then leave source mode to return to SiYuan’s rendered editing view.
+The plugin adds a `Source` button near the lower-left corner of the current document. Click it to edit the document like a regular Markdown file, then exit source mode to return to SiYuan’s normal editor.
 
-## Before You Use It
+## Editing
 
-- **Source mode writes Markdown back to SiYuan and lets SiYuan reparse it into blocks; it is not a lossless internal block-source editor.**
-- **Database blocks, super blocks, embeds, block/custom attributes, child block IDs, block references, PDF annotations, and complex HTML may not be preserved completely.**
-- **Edits are written back automatically while you type; avoid changing content if you only want to inspect the source.**
-- **Back up important or complex documents first. If an update fails, copy the current Markdown before handling the error.**
+- Regular Markdown can be edited directly, including text, headings, code blocks, math, dividers, HTML, lists, blockquotes, and tables.
+- SiYuan-specific content that cannot yet be changed safely appears as a locked card and is left untouched.
+- If a change might damage existing content or layout, the plugin stops the save and explains why.
+- Changes are saved automatically after about one second.
+- If saving fails, you can discard unsaved changes and exit source mode normally.
 
 ## Overview
 
-- Adds a lower-left source mode toggle that visually fits SiYuan’s status-bar style.
-- Uses CodeMirror 6 for Markdown editing, syntax highlighting, line numbers, wrapping, bracket matching, and edit history.
-- Opens near the current cursor position when possible and tries to preserve the current reading position.
-- Automatically performs delayed real-time updates while editing and shows the save status in the lower-right corner.
-- Refreshes the current editor after leaving source mode so rendered content and the outline update promptly.
-- Normalizes pasted Markdown by removing an outer Markdown code fence and common indentation when appropriate.
-- Removes SiYuan export front matter such as `title`, `date`, and `lastmod`.
-- Removes leading duplicate H1 document-title headings from exported Markdown before writing it back.
-- Does not directly read or write files under `workspace/data`; all reads and writes go through SiYuan kernel APIs.
+- Adds a `Source` button in the lower-left corner of the document.
+- Includes Markdown highlighting, line numbers, wrapping, bracket matching, and undo history.
+- Lets you edit regular content as one continuous Markdown document while clearly marking content that is locked.
+- Saves changes automatically and shows the current save status in the lower-right corner.
+- Tries to keep your reading position when entering and leaving source mode.
+- Refreshes the document and outline after you exit.
 
 ## Usage
 
 1. Open a regular document.
 2. Click `Source` in the lower-left corner.
 3. Edit the Markdown source.
-4. Wait for the lower-right status to show that the real-time update succeeded, or click `Exit` to save pending changes and return to the rendered view.
+4. Wait for the lower-right status to show that saving is complete, or click `Exit` to save and return to the normal editor.
 
 Keyboard shortcuts:
 
@@ -45,63 +43,59 @@ Status messages:
 
 | Status | Meaning |
 | --- | --- |
-| `Real-time updates enabled` | Source mode is open and waiting for edits |
-| `Updating...` | Markdown is being written back to the current document |
-| `Updated HH:MM:SS` | The latest change has been written back |
-| `Update failed HH:MM:SS` | The latest write failed; avoid closing source mode before handling it |
+| `Block-safe updates · N editable · M protected` | Shows how much content can be edited and how much is locked |
+| `Changes pending · protected blocks stay untouched` | Your changes will be saved shortly |
+| `Updating N content block(s)...` | Changes are being saved |
+| `Updated N content block(s) HH:MM:SS` | Changes were saved successfully |
+| `<Block type> is protected in this version` | This content cannot yet be changed safely |
 | `The current context is read-only; real-time updates are disabled` | The current environment does not allow writes |
 
 ## Changelog
 
+### v0.1.8
+
+- Regular Markdown is now easier to edit and saves automatically.
+- Improved editing for lists, task lists, blockquotes, and tables.
+- Fixed some HTML content turning into paragraphs or being split apart after saving.
+- SiYuan-specific content that cannot yet be changed safely is locked automatically.
+- A failed save can now be discarded and exited without entering a repeated save loop.
+
 ### v0.1.7
 
-- Fixed plugin-wide SiYuan layer overrides that caused the Settings > Editor > Font dropdown to be hidden behind the settings dialog.
-- Scoped source-mode layer adjustments so they only apply while source mode is open, avoiding interference with other SiYuan UI.
+- Fixed the font menu being hidden behind the Settings window.
+- Prevented source mode from affecting other parts of SiYuan.
 
 ### v0.1.6
 
-- Fixed extra blank lines and whitespace-only lines being removed after source-mode saves.
-- Preserves intentional empty paragraphs before writing Markdown back to SiYuan while leaving normal Markdown paragraph separators and fenced-code blank lines unchanged.
+- Fixed extra blank or whitespace-only lines disappearing after saving.
 
 ### v0.1.5
 
-- Avoided stale editor context during document switches.
-- Canceled pending reload and cursor-restore work when switching documents.
-- Compressed the preview image without changing its resolution.
+- Fixed refresh and cursor-position problems when switching documents.
+- Reduced the preview image file size.
 
 ### v0.1.4
 
-- Improved the source-mode button in split views so it follows the document area currently being edited.
-- Fixed missing, misplaced, and overlapping buttons in vertical and horizontal split views.
-- Updated the source-mode and exit buttons to better match SiYuan’s bottom status bar style.
-- Improved source editor width in narrow split views for a more comfortable reading area.
+- Improved the source-mode button and editor layout in split views.
 
 ### v0.1.3
 
-- Moved and bolded usage notes with shorter risk guidance.
-- Set backend compatibility to `all`.
+- Improved the usage notes and compatibility.
 
 ### v0.1.2
 
-- Added dynamic read-only synchronization for source mode, including SiYuan editor read-only settings, publish mode, and disabled Protyle instances.
-- Made the source editor non-editable in read-only contexts and blocked paste dispatches while read-only.
-- Hardened cleanup during plugin unload, reload, and update so pending cursor-restore observers, timers, and animation frames are released.
-- Avoided calling stale editor reload handles after a document tab has been destroyed or reopened.
-- Verified the desktop UI on the declared frontends: `desktop`, `browser-desktop`, and `desktop-window`.
+- Source mode now follows SiYuan’s read-only state and locks editing when needed.
+- Fixed leftover actions after reloading the plugin, updating it, or closing a document.
+- Checked the interface on desktop versions of SiYuan.
 
 ### v0.1.1
 
-- Removed `all` from the plugin manifest frontend declarations so mobile clients do not load the desktop source editor after sync.
-- Added touch-event guards for the source-mode buttons to avoid focusing the editor and opening the soft keyboard when tapping exit.
+- Prevented the plugin from loading on phones and tablets.
+- Improved the touch behavior of the exit button.
 
 ### v0.1.0
 
 - Added Markdown source editing for the current document.
-- Added the lower-left source-mode toggle.
-- Added a CodeMirror 6 editor with Markdown highlighting, line numbers, wrapping, bracket matching, and edit history.
-- Added delayed real-time updates with a visible save status.
-- Added double-tap `Ctrl`, `Ctrl + S`, and `Esc` shortcuts.
-- Added cursor positioning on entry and cursor restoration after exit.
-- Added pasted Markdown cleanup for outer code fences and common indentation.
-- Added cleanup for SiYuan export metadata and duplicate document-title headings.
-- Added current-editor refresh after saving to improve rendered-view synchronization.
+- Added highlighting, line numbers, wrapping, undo history, and common shortcuts.
+- Added automatic saving, save-status messages, and cursor-position recovery.
+- Improved Markdown pasting and document refresh after exit.

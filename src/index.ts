@@ -20,7 +20,15 @@ import {
 import { tags as t } from "@lezer/highlight";
 import { Plugin, confirm, getFrontend, showMessage } from "siyuan";
 
-import { exportMdContent, updateBlockByMarkdown } from "./api";
+import {
+  exportMdContent,
+  getBlockKramdown,
+  getChildBlocks,
+  getSiyuanBlockTree,
+  updateBlockByMarkdown,
+  updateBlockBySource,
+  updateBlockByPreparedSource,
+} from "./api";
 import {
   captureMarkdownCursorHint,
   captureProtyleCursorHint,
@@ -34,10 +42,39 @@ import {
 } from "./dom";
 import { getErrorMessage } from "./error";
 import { normalizeMarkdownForSave, normalizePastedMarkdown } from "./markdown";
+import {
+  createSiyuanContainerEditPlan,
+  haveSameSiyuanBlockTree,
+  type SiyuanContainerEditPlan,
+  type SiyuanContainerSourceUpdate,
+} from "./siyuan-container";
+import {
+  createSiyuanSourceEditorSupport,
+  type SiyuanSourceEditorSupport,
+} from "./siyuan-protection";
+import {
+  collectSiyuanBlockEdits,
+  createSiyuanSourceDocument,
+  areSiyuanMarkdownBlocksEquivalent,
+  getSiyuanChildBlockSource,
+  matchesSiyuanBlockIal,
+  matchesSiyuanKramdownSnapshot,
+  matchesSiyuanSourceSnapshot,
+  matchesSiyuanKramdownIals,
+  movePositionOutsideProtectedBlock,
+  validateSiyuanBlockEdit,
+  prepareSiyuanListItemSourceForUpdate,
+  type SiyuanBlockEdit,
+  type SiyuanBlockValidationIssue,
+  type SiyuanChildBlockData,
+  type SiyuanSourceBlock,
+  type SiyuanSourceDocument,
+} from "./siyuan-source";
 import "./style.css";
 
 const STATUS_BUTTON_CLASS = "markdown-edit-mode-status-btn";
 const FULLSCREEN_CLASS = "markdown-edit-mode-fullscreen";
+const BLOCK_SOURCE_CLASS = "is-siyuan-block-source";
 const EDITOR_CLASS = "markdown-edit-mode-editor";
 const EXIT_BUTTON_CLASS = "markdown-edit-mode-exit-btn";
 const SAVE_STATUS_CLASS = "markdown-edit-mode-save-status";
@@ -47,6 +84,7 @@ const SOURCE_ACTIVE_BODY_CLASS = "markdown-edit-mode-source-active";
 const PREPARING_CLASS = "is-preparing";
 const RENDERED_TEXT_WIDTH_PROPERTY = "--markdown-edit-mode-rendered-text-width";
 const REALTIME_SAVE_DELAY = 1000;
+const BLOCK_SOURCE_BACKUP_STORAGE_NAME = "last-block-source-backup.json";
 const LEGACY_DRAFT_STORAGE_PREFIX = "siyuan-plugin-markdown-edit-mode:source-draft:v1:";
 const PENDING_CURSOR_HINT_MAX_AGE = 600;
 const RENDERED_CURSOR_HINT_CACHE_MAX_AGE = 10000;
@@ -66,8 +104,12 @@ const DEFAULT_I18N = {
   titleSaveAndExitSourceMode: "Save and exit Markdown source mode",
   messageDocumentNotFound: "No active document found",
   messageEnterFailed: "Failed to enter source mode: {{message}}",
+  messageBlockSourceFallback: "Block-safe mode is unavailable; using lossy standard Markdown mode.",
   messageMarkdownSaved: "Markdown saved",
   messageSaveFailed: "Failed to save Markdown: {{message}}",
+  dialogDiscardTitle: "Discard unsaved source changes?",
+  dialogDiscardContent:
+    "Saving is still incomplete. Discarding will remove source-editor changes that were not written to SiYuan. Changes already written to SiYuan will be kept and the document will refresh. Discard and exit?",
   dialogSaveRiskTitle: "Save source mode content",
   dialogSaveRiskContent:
     "Saving standard Markdown reparses the document. Complex blocks, block attributes, and child block IDs may not be preserved losslessly. Continue?",
@@ -76,9 +118,42 @@ const DEFAULT_I18N = {
   statusRealtimeSaving: "Updating...",
   statusRealtimeSuccess: "Updated {{time}}",
   statusRealtimeFailed: "Update failed {{time}}",
+  statusBlockReady: "Block-safe updates · {{editable}} editable · {{protected}} protected",
+  statusBlockModified: "Changes pending · protected blocks stay untouched",
+  statusBlockSaving: "Updating {{count}} content block(s)...",
+  statusBlockSuccess: "Updated {{count}} content block(s) {{time}}",
+  statusBlockReadonly: "The current context is read-only; block updates are disabled",
+  statusProtectedBlock: "This {{type}} edit would change protected block structure and was blocked",
+  statusSaveCancelled: "Save cancelled",
   errorExportFailed: "Failed to export Markdown",
   errorSaveFailed: "Failed to save Markdown",
+  errorBlockSourceLoadFailed: "Failed to load SiYuan content blocks",
+  errorBlockKramdownLoadFailed: "Failed to load the lossless document snapshot",
+  errorBlockIalMissing: "SiYuan block attributes could not be preserved safely.",
+  errorBlockConflict: "The document changed outside source mode. Reload before saving.",
+  errorBlockStructureChanged: "The document block structure changed during saving.",
+  errorBlockValidationFailed: "This {{type}} edit would split a block, change protected structure, or convert to an incompatible block.",
+  errorBlockBackupFailed: "Failed to create the pre-save recovery snapshot",
+  errorBlockVerificationFailed: "SiYuan returned a different block representation after saving.",
   errorRefreshEditorFailed: "Failed to refresh the SiYuan editor",
+  blockTypeParagraph: "Paragraph",
+  blockTypeHeading: "Heading",
+  blockTypeCode: "Code block",
+  blockTypeMath: "Math block",
+  blockTypeThematicBreak: "Divider",
+  blockTypeList: "List",
+  blockTypeBlockquote: "Blockquote",
+  blockTypeTable: "Table",
+  blockTypeCallout: "Callout",
+  blockTypeSuperBlock: "Super block",
+  blockTypeQueryEmbed: "Query embed",
+  blockTypeAttributeView: "Database",
+  blockTypeHtml: "HTML block",
+  blockTypeIFrame: "Iframe",
+  blockTypeVideo: "Video",
+  blockTypeAudio: "Audio",
+  blockTypeWidget: "Widget",
+  blockTypeUnknown: "SiYuan content block",
 } as const;
 
 type I18nKey = keyof typeof DEFAULT_I18N;
@@ -111,6 +186,7 @@ const typoraHighlightStyle = HighlightStyle.define([
 ]);
 
 export default class MarkdownEditModePlugin extends Plugin {
+  private sourceModeKind: "block" | "legacy" = "legacy";
   private isSourceMode = false;
   private isEntering = false;
   private isSaving = false;
@@ -144,11 +220,16 @@ export default class MarkdownEditModePlugin extends Plugin {
   private sourceEditorTextWidth: number | null = null;
   private reloadRestoreCleanup: (() => void) | null = null;
   private sourceReadonly = false;
+  private blockSourceDocument: SiyuanSourceDocument | null = null;
+  private blockEditorSupport: SiyuanSourceEditorSupport | null = null;
+  private protectedStatusTimerId: number | null = null;
+  private lastProtectedEditNoticeAt = 0;
   private readonlyCompartment = new Compartment();
   private editableCompartment = new Compartment();
   private ctrlTapArmed = false;
   private ctrlTapHadOtherKey = false;
   private lastCtrlTapAt = 0;
+  private isDiscardPromptOpen = false;
   private statusButtonClickGate = createClickSuppressionGate();
   private exitButtonClickGate = createClickSuppressionGate();
 
@@ -159,6 +240,87 @@ export default class MarkdownEditModePlugin extends Plugin {
     return template.replace(/\{\{(\w+)}}/g, (_, token: string) =>
       String(params[token] ?? ""),
     );
+  }
+
+  private getSiyuanBlockTypeLabel(block: Pick<SiyuanSourceBlock, "type" | "subType">): string {
+    let key: I18nKey;
+
+    switch (block.type) {
+      case "p":
+        key = "blockTypeParagraph";
+        break;
+      case "h":
+        key = "blockTypeHeading";
+        break;
+      case "c":
+        key = "blockTypeCode";
+        break;
+      case "m":
+        key = "blockTypeMath";
+        break;
+      case "tb":
+        key = "blockTypeThematicBreak";
+        break;
+      case "l":
+        key = "blockTypeList";
+        break;
+      case "b":
+        key = "blockTypeBlockquote";
+        break;
+      case "t":
+        key = "blockTypeTable";
+        break;
+      case "callout":
+        key = "blockTypeCallout";
+        break;
+      case "s":
+        key = "blockTypeSuperBlock";
+        break;
+      case "query_embed":
+        key = "blockTypeQueryEmbed";
+        break;
+      case "av":
+        key = "blockTypeAttributeView";
+        break;
+      case "html":
+        key = "blockTypeHtml";
+        break;
+      case "iframe":
+        key = "blockTypeIFrame";
+        break;
+      case "video":
+        key = "blockTypeVideo";
+        break;
+      case "audio":
+        key = "blockTypeAudio";
+        break;
+      case "widget":
+        key = "blockTypeWidget";
+        break;
+      default:
+        key = "blockTypeUnknown";
+    }
+
+    return this.t(key);
+  }
+
+  private getInitialSaveStatus(): string {
+    if (this.isReadonlyContext()) {
+      return this.sourceModeKind === "block"
+        ? this.t("statusBlockReadonly")
+        : this.t("statusRealtimeReadonly");
+    }
+
+    const sourceDocument = this.blockSourceDocument;
+
+    if (this.sourceModeKind !== "block" || !sourceDocument) {
+      return this.t("statusRealtimeEnabled");
+    }
+
+    return this.t("statusBlockReady", {
+      editable: sourceDocument.blocks.filter((block) => block.editable).length,
+      protected: sourceDocument.blocks.filter((block) => !block.editable).length,
+    });
   }
 
   onload() {
@@ -276,7 +438,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     }
 
     if (this.isSourceMode) {
-      await this.exitSourceMode(true);
+      await this.handleEscapeExit();
       return;
     }
 
@@ -296,7 +458,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       return;
     }
 
-    await this.exitSourceMode(true);
+    await this.handleEscapeExit();
   }
 
   private async enterSourceMode(
@@ -323,16 +485,59 @@ export default class MarkdownEditModePlugin extends Plugin {
       }
 
       const cursorHint = this.getCursorHintForEnter(context);
-      const {
-        markdown,
-        removedFrontMatterCount,
-        removedDocTitleHeadingCount,
-        docTitle,
-      } = await exportMdContent(context.docId, {
-        exportFailed: this.t("errorExportFailed"),
-      });
+      let markdown: string;
+      let removedFrontMatterCount = 0;
+      let removedDocTitleHeadingCount = 0;
+      let docTitle: string | null = null;
+
+      try {
+        const [children, rootKramdown] = await Promise.all([
+          getChildBlocks(context.docId, this.t("errorBlockSourceLoadFailed")),
+          getBlockKramdown(context.docId, this.t("errorBlockKramdownLoadFailed")),
+        ]);
+
+        if (generation !== this.operationGeneration) {
+          return;
+        }
+
+        const sourceDocument = createSiyuanSourceDocument(children, rootKramdown);
+
+        this.sourceModeKind = "block";
+        this.blockSourceDocument = sourceDocument;
+        this.blockEditorSupport = createSiyuanSourceEditorSupport(sourceDocument, {
+          getBlockLabel: (block) => this.getSiyuanBlockTypeLabel(block),
+          onBlockedEdit: (block) => this.handleProtectedBlockEdit(block),
+        });
+        markdown = sourceDocument.markdown;
+      } catch (blockSourceError) {
+        if (generation !== this.operationGeneration) {
+          return;
+        }
+
+        console.warn(this.t("errorBlockSourceLoadFailed"), blockSourceError);
+        const exported = await exportMdContent(context.docId, {
+          exportFailed: this.t("errorExportFailed"),
+        });
+
+        if (generation !== this.operationGeneration) {
+          return;
+        }
+
+        this.sourceModeKind = "legacy";
+        this.blockSourceDocument = null;
+        this.blockEditorSupport = null;
+        markdown = exported.markdown;
+        removedFrontMatterCount = exported.removedFrontMatterCount;
+        removedDocTitleHeadingCount = exported.removedDocTitleHeadingCount;
+        docTitle = exported.docTitle;
+        showMessage(this.t("messageBlockSourceFallback"), 5000, "error");
+      }
+
       this.clearLegacyDraft(context.docId);
-      const initialCursor = resolveMarkdownCursorPosition(markdown, cursorHint);
+      const resolvedCursor = resolveMarkdownCursorPosition(markdown, cursorHint);
+      const initialCursor = this.blockSourceDocument
+        ? movePositionOutsideProtectedBlock(this.blockSourceDocument, resolvedCursor)
+        : resolvedCursor;
       this.activeProtyle = context.protyle;
       this.activeDocId = context.docId;
       const editor = this.createFullscreenEditor(
@@ -382,6 +587,10 @@ export default class MarkdownEditModePlugin extends Plugin {
     const fullscreen = document.createElement("div");
     fullscreen.className = `${FULLSCREEN_CLASS} ${PREPARING_CLASS}`;
 
+    if (this.sourceModeKind === "block") {
+      fullscreen.classList.add(BLOCK_SOURCE_CLASS);
+    }
+
     const editorHost = document.createElement("div");
     editorHost.className = EDITOR_CLASS;
     this.sourceEditorTextWidth = normalizeRenderedTextWidth(renderedTextWidth);
@@ -419,7 +628,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       (event) => {
         preventModeButtonFocus(event);
         this.exitButtonClickGate.suppress();
-        void this.exitSourceMode(true);
+        void this.handleEscapeExit();
       },
       { passive: false },
     );
@@ -430,9 +639,7 @@ export default class MarkdownEditModePlugin extends Plugin {
 
     const saveStatus = document.createElement("div");
     saveStatus.className = SAVE_STATUS_CLASS;
-    saveStatus.textContent = this.isReadonlyContext()
-      ? this.t("statusRealtimeReadonly")
-      : this.t("statusRealtimeEnabled");
+    saveStatus.textContent = this.getInitialSaveStatus();
 
     fullscreen.appendChild(editorHost);
     fullscreen.appendChild(exitButton);
@@ -511,6 +718,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       markdown(),
       EditorView.lineWrapping,
       syntaxHighlighting(typoraHighlightStyle, { fallback: true }),
+      ...(this.blockEditorSupport ? [this.blockEditorSupport.extension] : []),
       this.editableCompartment.of(EditorView.editable.of(!readonly)),
       EditorView.domEventHandlers({
         paste: (event, view) => this.handleEditorPaste(event, view),
@@ -530,7 +738,7 @@ export default class MarkdownEditModePlugin extends Plugin {
           key: "Mod-s",
           preventDefault: true,
           run: () => {
-            void this.exitSourceMode(true);
+            void this.handleEscapeExit();
             return true;
           },
         },
@@ -583,7 +791,9 @@ export default class MarkdownEditModePlugin extends Plugin {
 
     event.preventDefault();
 
-    const pastedMarkdown = normalizePastedMarkdown(clipboardText);
+    const pastedMarkdown = this.sourceModeKind === "block"
+      ? clipboardText.replace(/\r\n?/g, "\n")
+      : normalizePastedMarkdown(clipboardText);
     const transaction = view.state.replaceSelection(pastedMarkdown);
 
     view.dispatch({
@@ -593,6 +803,41 @@ export default class MarkdownEditModePlugin extends Plugin {
     });
 
     return true;
+  }
+
+  private handleProtectedBlockEdit(block: SiyuanSourceBlock | null) {
+    const now = Date.now();
+
+    if (now - this.lastProtectedEditNoticeAt < 120) {
+      return;
+    }
+
+    this.lastProtectedEditNoticeAt = now;
+    this.clearProtectedStatusTimer();
+    this.updateRealtimeSaveStatus(
+      this.t("statusProtectedBlock", {
+        type: block ? this.getSiyuanBlockTypeLabel(block) : this.t("blockTypeUnknown"),
+      }),
+      true,
+    );
+    this.protectedStatusTimerId = window.setTimeout(() => {
+      this.protectedStatusTimerId = null;
+
+      if (!this.isSourceMode || this.sourceModeKind !== "block") {
+        return;
+      }
+
+      this.updateRealtimeSaveStatus(
+        this.hasSourceChanges() ? this.t("statusBlockModified") : this.getInitialSaveStatus(),
+      );
+    }, 1800);
+  }
+
+  private clearProtectedStatusTimer() {
+    if (this.protectedStatusTimerId !== null) {
+      window.clearTimeout(this.protectedStatusTimerId);
+      this.protectedStatusTimerId = null;
+    }
   }
 
   private isReadonlyContext(): boolean {
@@ -682,7 +927,12 @@ export default class MarkdownEditModePlugin extends Plugin {
           return;
         }
       } else if (readonly) {
-        this.updateRealtimeSaveStatus(this.t("statusRealtimeReadonly"), true);
+        this.updateRealtimeSaveStatus(
+          this.sourceModeKind === "block"
+            ? this.t("statusBlockReadonly")
+            : this.t("statusRealtimeReadonly"),
+          true,
+        );
       }
 
       const shouldReloadEditor = saved || this.hasRealtimeSaved;
@@ -712,6 +962,7 @@ export default class MarkdownEditModePlugin extends Plugin {
 
   private cleanupSourceMode() {
     this.stopRealtimeSaveTimer();
+    this.clearProtectedStatusTimer();
     this.stopReadonlySync();
     this.sourceEditor?.destroy();
     this.sourceEditor = null;
@@ -736,6 +987,11 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.removedDocTitleHeadingCount = 0;
     this.activeDocTitle = null;
     this.sourceEditorTextWidth = null;
+    this.sourceModeKind = "legacy";
+    this.blockSourceDocument = null;
+    this.blockEditorSupport = null;
+    this.lastProtectedEditNoticeAt = 0;
+    this.isDiscardPromptOpen = false;
     this.sourceReadonly = false;
 
     this.updateButtonState(false);
@@ -788,8 +1044,15 @@ export default class MarkdownEditModePlugin extends Plugin {
         this.editableCompartment.reconfigure(EditorView.editable.of(!readonly)),
       ],
     });
+    const status = this.sourceModeKind === "block"
+      ? readonly
+        ? this.t("statusBlockReadonly")
+        : this.getInitialSaveStatus()
+      : readonly
+        ? this.t("statusRealtimeReadonly")
+        : this.t("statusRealtimeEnabled");
     this.updateRealtimeSaveStatus(
-      readonly ? this.t("statusRealtimeReadonly") : this.t("statusRealtimeEnabled"),
+      status,
       readonly,
     );
   };
@@ -943,6 +1206,14 @@ export default class MarkdownEditModePlugin extends Plugin {
   };
 
   private hasSourceChanges(): boolean {
+    if (this.sourceModeKind === "block") {
+      try {
+        return this.getCurrentBlockEdits().length > 0;
+      } catch {
+        return this.sourceDirty;
+      }
+    }
+
     if (!this.sourceDirty && !this.needsCleanupSave()) {
       return false;
     }
@@ -956,6 +1227,10 @@ export default class MarkdownEditModePlugin extends Plugin {
   private scheduleRealtimeSave() {
     if (!this.isSourceMode || this.isSaving) {
       return;
+    }
+
+    if (this.sourceModeKind === "block") {
+      this.updateRealtimeSaveStatus(this.t("statusBlockModified"));
     }
 
     this.realtimeSaveRequested = true;
@@ -1009,6 +1284,14 @@ export default class MarkdownEditModePlugin extends Plugin {
   }
 
   private async performRealtimeSave(): Promise<boolean> {
+    if (this.sourceModeKind === "block") {
+      return this.performBlockSourceSave();
+    }
+
+    return this.performLegacyRealtimeSave();
+  }
+
+  private async performLegacyRealtimeSave(): Promise<boolean> {
     const docId = this.activeDocId;
     const editor = this.sourceEditor;
 
@@ -1027,6 +1310,12 @@ export default class MarkdownEditModePlugin extends Plugin {
     try {
       if (this.isReadonlyContext()) {
         this.updateRealtimeSaveStatus(this.t("statusRealtimeReadonly"), true);
+        return false;
+      }
+
+      if (!(await this.confirmWriteRisk())) {
+        this.realtimeSaveRequested = false;
+        this.updateRealtimeSaveStatus(this.t("statusSaveCancelled"), true);
         return false;
       }
 
@@ -1062,6 +1351,439 @@ export default class MarkdownEditModePlugin extends Plugin {
     }
   }
 
+  private getCurrentBlockEdits(editor: EditorView | null = this.sourceEditor): SiyuanBlockEdit[] {
+    const sourceDocument = this.blockSourceDocument;
+    const support = this.blockEditorSupport;
+
+    if (!editor || !sourceDocument || !support) {
+      return [];
+    }
+
+    return collectSiyuanBlockEdits(
+      sourceDocument,
+      support.getMappedBlocks(editor.state),
+      editor.state.doc.toString(),
+    );
+  }
+
+  private async createSiyuanBlockUpdatePlans(
+    edits: readonly SiyuanBlockEdit[],
+    sourceById: ReadonlyMap<string, SiyuanSourceBlock>,
+    latestChildren: readonly SiyuanChildBlockData[],
+  ): Promise<{
+    updates: SiyuanContainerSourceUpdate[];
+    containerPlans: SiyuanContainerEditPlan[];
+  }> {
+    const latestById = new Map(latestChildren.map((child) => [child.id, child]));
+    const updates: SiyuanContainerSourceUpdate[] = [];
+    const containerPlans: SiyuanContainerEditPlan[] = [];
+
+    for (const edit of edits) {
+      const sourceBlock = sourceById.get(edit.id);
+
+      if (!sourceBlock) {
+        throw new Error(this.t("errorBlockStructureChanged"));
+      }
+
+      if (
+        (sourceBlock.type === "l" || sourceBlock.type === "b") &&
+        edit.type === sourceBlock.type
+      ) {
+        const latest = latestById.get(edit.id);
+
+        if (!latest) {
+          throw new Error(this.t("errorBlockStructureChanged"));
+        }
+
+        const tree = await getSiyuanBlockTree(
+          latest,
+          this.t("errorBlockSourceLoadFailed"),
+        );
+        const plan = createSiyuanContainerEditPlan(sourceBlock, edit.markdown, tree);
+        containerPlans.push(plan);
+        updates.push(...plan.updates);
+        continue;
+      }
+
+      updates.push({
+        ownerId: edit.id,
+        id: edit.id,
+        type: edit.type,
+        subType: edit.subType,
+        kind: "source",
+        markdown: edit.markdown,
+        originalMarkdown: sourceBlock.serverMarkdown,
+        control: null,
+      });
+    }
+
+    const updateIds = new Set<string>();
+
+    for (const update of updates) {
+      if (updateIds.has(update.id)) {
+        throw new Error(this.t("errorBlockStructureChanged"));
+      }
+
+      updateIds.add(update.id);
+    }
+
+    return { updates, containerPlans };
+  }
+
+  private async performBlockSourceSave(): Promise<boolean> {
+    const docId = this.activeDocId;
+    const editor = this.sourceEditor;
+    const sourceDocument = this.blockSourceDocument;
+
+    if (!docId || !editor || !sourceDocument || !this.blockEditorSupport) {
+      return false;
+    }
+
+    const startMarkdown = editor.state.doc.toString();
+    let edits: SiyuanBlockEdit[];
+
+    try {
+      edits = this.getCurrentBlockEdits(editor);
+    } catch (error) {
+      this.reportBlockSaveError(error);
+      return false;
+    }
+
+    if (edits.length === 0) {
+      this.sourceDirty = false;
+      this.updateRealtimeSaveStatus(this.getInitialSaveStatus());
+      return false;
+    }
+
+    const sourceById = new Map(sourceDocument.blocks.map((block) => [block.id, block]));
+
+    for (const edit of edits) {
+      const sourceBlock = sourceById.get(edit.id);
+
+      if (!sourceBlock) {
+        this.reportBlockSaveError(new Error(this.t("errorBlockStructureChanged")));
+        return false;
+      }
+
+      const validation = validateSiyuanBlockEdit(sourceBlock, edit.markdown);
+
+      if (!validation.valid) {
+        this.reportBlockSaveError(
+          this.createBlockValidationError(sourceBlock, validation.issue),
+        );
+        return false;
+      }
+
+      if (validation.nextType) {
+        edit.type = validation.nextType;
+        edit.subType = null;
+      }
+    }
+
+    if (this.isReadonlyContext()) {
+      this.updateRealtimeSaveStatus(this.t("statusBlockReadonly"), true);
+      return false;
+    }
+
+    const savedIds = new Set<string>();
+
+    try {
+      this.updateRealtimeSaveStatus(
+        this.t("statusBlockSaving", { count: edits.length }),
+      );
+
+      const [latestChildren, latestKramdown] = await Promise.all([
+        getChildBlocks(docId, this.t("errorBlockSourceLoadFailed")),
+        getBlockKramdown(docId, this.t("errorBlockKramdownLoadFailed")),
+      ]);
+
+      if (
+        !matchesSiyuanKramdownSnapshot(sourceDocument.rootKramdown, latestKramdown) ||
+        !matchesSiyuanSourceSnapshot(sourceDocument, latestChildren)
+      ) {
+        throw new Error(this.t("errorBlockConflict"));
+      }
+      const { updates, containerPlans } = await this.createSiyuanBlockUpdatePlans(
+        edits,
+        sourceById,
+        latestChildren,
+      );
+      const originalContainerKramdownEntries = await Promise.all(
+        containerPlans.map(async (plan) => [
+          plan.ownerId,
+          await getBlockKramdown(plan.ownerId, this.t("errorBlockKramdownLoadFailed")),
+        ] as const),
+      );
+      const originalContainerKramdownById = new Map(originalContainerKramdownEntries);
+
+
+      const originalBlockKramdownEntries = await Promise.all(
+        updates.map(async (update) => [
+          update.id,
+          await getBlockKramdown(update.id, this.t("errorBlockKramdownLoadFailed")),
+        ] as const),
+      );
+      const originalBlockKramdownById = new Map(originalBlockKramdownEntries);
+
+      if (
+        originalBlockKramdownEntries.some(
+          ([id, kramdown]) => !matchesSiyuanBlockIal(id, kramdown, kramdown),
+        ) ||
+        originalContainerKramdownEntries.some(
+          ([id, kramdown]) => !matchesSiyuanBlockIal(id, kramdown, kramdown),
+        )
+      ) {
+        throw new Error(this.t("errorBlockIalMissing"));
+      }
+
+      if (!matchesSiyuanKramdownSnapshot(
+        latestKramdown,
+        await getBlockKramdown(docId, this.t("errorBlockKramdownLoadFailed")),
+      )) {
+        throw new Error(this.t("errorBlockConflict"));
+      }
+
+      const backupResponse = await this.saveData(BLOCK_SOURCE_BACKUP_STORAGE_NAME, {
+        version: 1,
+        docId,
+        createdAt: new Date().toISOString(),
+        rootKramdown: sourceDocument.rootKramdown,
+        blocks: sourceDocument.blocks.map((block) => ({
+          id: block.id,
+          type: block.type,
+          subType: block.subType,
+          markdown: block.markdown,
+          serverMarkdown: block.serverMarkdown,
+        })),
+        editedBlocks: updates.map((update) => ({
+          id: update.id,
+          ownerId: update.ownerId,
+          kramdown: originalBlockKramdownById.get(update.id),
+        })),
+        editedContainers: containerPlans.map((plan) => ({
+          id: plan.ownerId,
+          kramdown: originalContainerKramdownById.get(plan.ownerId),
+        })),
+      });
+
+      if (backupResponse.code !== 0) {
+        throw new Error(backupResponse.msg || this.t("errorBlockBackupFailed"));
+      }
+
+      for (const update of updates) {
+        const originalBlockKramdown = originalBlockKramdownById.get(update.id);
+
+        if (!originalBlockKramdown) {
+          throw new Error(this.t("errorBlockIalMissing"));
+        }
+
+        if (update.kind === "source") {
+          if (update.markdown === null || update.originalMarkdown === null) {
+            throw new Error(this.t("errorBlockStructureChanged"));
+          }
+
+          await updateBlockBySource(
+            update.id,
+            update.type,
+            update.markdown,
+            update.originalMarkdown,
+            originalBlockKramdown,
+            this.t("errorSaveFailed"),
+          );
+        } else {
+          if (!update.control) {
+            throw new Error(this.t("errorBlockStructureChanged"));
+          }
+
+          await updateBlockByPreparedSource(
+            update.id,
+            prepareSiyuanListItemSourceForUpdate(
+              update.id,
+              originalBlockKramdown,
+              update.control,
+            ),
+            this.t("errorSaveFailed"),
+          );
+        }
+
+        savedIds.add(update.ownerId);
+        this.hasRealtimeSaved = true;
+      }
+
+      const [refreshedChildren, refreshedKramdown, refreshedBlockKramdowns] = await Promise.all([
+        getChildBlocks(docId, this.t("errorBlockSourceLoadFailed")),
+        getBlockKramdown(docId, this.t("errorBlockKramdownLoadFailed")),
+        Promise.all(
+          updates.map((update) =>
+            getBlockKramdown(update.id, this.t("errorBlockKramdownLoadFailed")),
+          ),
+        ),
+      ]);
+      const refreshedById = new Map(refreshedChildren.map((child) => [child.id, child]));
+      const refreshedContainers = await Promise.all(
+        containerPlans.map(async (plan) => {
+          const child = refreshedById.get(plan.ownerId);
+
+          if (!child) {
+            throw new Error(this.t("errorBlockStructureChanged"));
+          }
+
+          const [tree, kramdown] = await Promise.all([
+            getSiyuanBlockTree(child, this.t("errorBlockSourceLoadFailed")),
+            getBlockKramdown(plan.ownerId, this.t("errorBlockKramdownLoadFailed")),
+          ]);
+          return { ownerId: plan.ownerId, tree, kramdown };
+        }),
+      );
+      const refreshedContainerById = new Map(
+        refreshedContainers.map((entry) => [entry.ownerId, entry]),
+      );
+
+
+      if (!hasSameSiyuanBlockOrder(sourceDocument, refreshedChildren, edits)) {
+        throw new Error(this.t("errorBlockStructureChanged"));
+      }
+
+      if (!matchesExpectedSiyuanBlockSnapshot(sourceDocument, refreshedChildren, edits)) {
+        throw new Error(this.t("errorBlockVerificationFailed"));
+      }
+
+      if (
+        updates.some((update, index) => {
+          const before = originalBlockKramdownById.get(update.id);
+          const after = refreshedBlockKramdowns[index];
+
+          return !before || !after || !matchesSiyuanBlockIal(update.id, before, after);
+        })
+      ) {
+        throw new Error(this.t("errorBlockVerificationFailed"));
+      }
+      for (const plan of containerPlans) {
+        const beforeKramdown = originalContainerKramdownById.get(plan.ownerId);
+        const refreshed = refreshedContainerById.get(plan.ownerId);
+
+        if (
+          !beforeKramdown ||
+          !refreshed ||
+          !haveSameSiyuanBlockTree(plan.beforeTree, refreshed.tree) ||
+          !matchesSiyuanKramdownIals(beforeKramdown, refreshed.kramdown)
+        ) {
+          throw new Error(this.t("errorBlockVerificationFailed"));
+        }
+      }
+
+
+      for (const edit of edits) {
+        const block = sourceById.get(edit.id);
+
+        if (block) {
+          block.markdown = edit.markdown;
+        }
+      }
+      for (const block of sourceDocument.blocks) {
+        const refreshed = refreshedById.get(block.id);
+
+        if (!refreshed) {
+          throw new Error(this.t("errorBlockStructureChanged"));
+        }
+
+        block.type = refreshed.type;
+        block.subType = refreshed.subType ?? null;
+        block.serverMarkdown = getSiyuanChildBlockSource(refreshed);
+      }
+
+
+      sourceDocument.rootKramdown = refreshedKramdown;
+      this.originalMarkdown = startMarkdown;
+      this.lastSavedMarkdown = startMarkdown;
+      this.removedFrontMatterCount = 0;
+      this.removedDocTitleHeadingCount = 0;
+      this.sourceDirty =
+        editor.state.doc.toString() !== startMarkdown ||
+        this.getCurrentBlockEdits(editor).length > 0;
+      this.updateRealtimeSaveStatus(
+        this.t("statusBlockSuccess", {
+          count: edits.length,
+          time: formatStatusTime(new Date()),
+        }),
+      );
+      return true;
+    } catch (error) {
+      if (savedIds.size > 0) {
+        await this.refreshBlockSourceAfterPartialSave(docId, sourceDocument, savedIds);
+      }
+
+      this.sourceDirty = true;
+      this.reportBlockSaveError(error);
+      return false;
+    }
+  }
+
+  private createBlockValidationError(
+    block: SiyuanSourceBlock,
+    issue: SiyuanBlockValidationIssue | undefined,
+  ): Error {
+    const error = new Error(
+      this.t("errorBlockValidationFailed", {
+        type: this.getSiyuanBlockTypeLabel(block),
+      }),
+    );
+    error.name = issue ?? "invalid-block";
+    return error;
+  }
+
+  private async refreshBlockSourceAfterPartialSave(
+    docId: string,
+    sourceDocument: SiyuanSourceDocument,
+    savedIds: ReadonlySet<string>,
+  ) {
+    try {
+      const [children, rootKramdown] = await Promise.all([
+        getChildBlocks(docId, this.t("errorBlockSourceLoadFailed")),
+        getBlockKramdown(docId, this.t("errorBlockKramdownLoadFailed")),
+      ]);
+
+      if (!hasSameSiyuanBlockIdentityOrder(sourceDocument, children)) {
+        return;
+      }
+
+      const childById = new Map(children.map((child) => [child.id, child]));
+
+      for (const block of sourceDocument.blocks) {
+        const child = childById.get(block.id);
+
+        if (savedIds.has(block.id) && child) {
+          const serverMarkdown = getSiyuanChildBlockSource(child);
+          block.type = child.type;
+          block.subType = child.subType ?? null;
+          block.markdown = serverMarkdown;
+          block.serverMarkdown = serverMarkdown;
+        }
+      }
+
+      sourceDocument.rootKramdown = rootKramdown;
+    } catch (refreshError) {
+      console.warn(this.t("errorBlockVerificationFailed"), refreshError);
+    }
+  }
+
+  private reportBlockSaveError(error: unknown) {
+    const message = getErrorMessage(error);
+    const now = Date.now();
+
+    console.error(error);
+    this.updateRealtimeSaveStatus(message, true);
+
+    if (now - this.lastRealtimeSaveErrorAt > 5000) {
+      this.lastRealtimeSaveErrorAt = now;
+      showMessage(
+        this.t("messageSaveFailed", { message }),
+        5000,
+        "error",
+      );
+    }
+  }
+
   private updateRealtimeSaveStatus(text: string, isError = false) {
     const element = this.saveStatusElement;
 
@@ -1074,6 +1796,10 @@ export default class MarkdownEditModePlugin extends Plugin {
   }
 
   private getCurrentSourceMarkdown(editor: EditorView): string {
+    if (this.sourceModeKind === "block") {
+      return editor.state.doc.toString();
+    }
+
     if (!this.sourceDirty && !this.realtimeSaveRequested && !this.needsCleanupSave()) {
       return this.lastSavedMarkdown || this.originalMarkdown;
     }
@@ -1086,6 +1812,10 @@ export default class MarkdownEditModePlugin extends Plugin {
   }
 
   private needsCleanupSave(): boolean {
+    if (this.sourceModeKind === "block") {
+      return false;
+    }
+
     return this.removedFrontMatterCount > 1 || this.removedDocTitleHeadingCount > 1;
   }
 
@@ -1412,7 +2142,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     if (this.isSourceMode && event.ctrlKey && key === "s") {
       this.resetCtrlTap();
       event.preventDefault();
-      await this.exitSourceMode(true);
+      await this.handleEscapeExit();
       return;
     }
 
@@ -1481,7 +2211,37 @@ export default class MarkdownEditModePlugin extends Plugin {
   }
 
   private async handleEscapeExit() {
+    if (this.isDiscardPromptOpen) {
+      return;
+    }
+
     await this.exitSourceMode(true);
+
+    if (
+      !this.isSourceMode ||
+      this.isSaving ||
+      this.isDiscardPromptOpen ||
+      !this.hasSourceChanges()
+    ) {
+      return;
+    }
+
+    this.isDiscardPromptOpen = true;
+
+    const discard = await new Promise<boolean>((resolve) => {
+      confirm(
+        this.t("dialogDiscardTitle"),
+        this.t("dialogDiscardContent"),
+        () => resolve(true),
+        () => resolve(false),
+      );
+    });
+
+    this.isDiscardPromptOpen = false;
+
+    if (discard && this.isSourceMode && !this.isSaving) {
+      await this.exitSourceMode(false);
+    }
   }
 
   private beforeUnloadHandler = () => {
@@ -1499,6 +2259,58 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.updateButtonsBusy(false);
     this.positionStatusButton();
   };
+}
+
+function hasSameSiyuanBlockIdentityOrder(
+  sourceDocument: SiyuanSourceDocument,
+  children: readonly SiyuanChildBlockData[],
+): boolean {
+  return (
+    sourceDocument.blocks.length === children.length &&
+    sourceDocument.blocks.every((block, index) => children[index]?.id === block.id)
+  );
+}
+
+function hasSameSiyuanBlockOrder(
+  sourceDocument: SiyuanSourceDocument,
+  children: readonly SiyuanChildBlockData[],
+  edits: readonly SiyuanBlockEdit[] = [],
+): boolean {
+  if (!hasSameSiyuanBlockIdentityOrder(sourceDocument, children)) {
+    return false;
+  }
+
+  const expectedTypeById = new Map(edits.map((edit) => [edit.id, edit.type]));
+  return sourceDocument.blocks.every((block, index) =>
+    children[index]?.type === (expectedTypeById.get(block.id) ?? block.type)
+  );
+}
+
+function matchesExpectedSiyuanBlockSnapshot(
+  sourceDocument: SiyuanSourceDocument,
+  children: readonly SiyuanChildBlockData[],
+  edits: readonly SiyuanBlockEdit[],
+): boolean {
+  if (!hasSameSiyuanBlockOrder(sourceDocument, children, edits)) {
+    return false;
+  }
+
+  const editById = new Map(edits.map((edit) => [edit.id, edit]));
+
+  return sourceDocument.blocks.every((block, index) => {
+    const child = children[index];
+
+    if (!child) {
+      return false;
+    }
+
+    const edit = editById.get(block.id);
+    return areSiyuanMarkdownBlocksEquivalent(
+      edit?.type ?? block.type,
+      edit?.markdown ?? block.serverMarkdown,
+      getSiyuanChildBlockSource(child),
+    );
+  });
 }
 
 function getSourceCursorViewportY(editor: EditorView, position: number): number | null {
