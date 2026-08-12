@@ -18,7 +18,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { Plugin, confirm, getFrontend, showMessage } from "siyuan";
+import { Plugin, confirm, getFrontend, showMessage, type IProtyle } from "siyuan";
 
 import {
   exportMdContent,
@@ -40,8 +40,15 @@ import {
   getActiveEditorContext,
   getEditorContextByDocId,
 } from "./dom";
+import {
+  classifySourceDraft,
+  getSourceDraftStorageKey,
+  parseSourceDraft,
+  type SourceDraft,
+} from "./draft";
 import { getErrorMessage } from "./error";
 import { normalizeMarkdownForSave, normalizePastedMarkdown } from "./markdown";
+import { markdownStructureDecorations } from "./markdown-decorations";
 import {
   createSiyuanContainerEditPlan,
   haveSameSiyuanBlockTree,
@@ -84,6 +91,7 @@ const SOURCE_ACTIVE_BODY_CLASS = "markdown-edit-mode-source-active";
 const PREPARING_CLASS = "is-preparing";
 const RENDERED_TEXT_WIDTH_PROPERTY = "--markdown-edit-mode-rendered-text-width";
 const REALTIME_SAVE_DELAY = 1000;
+const SOURCE_DRAFT_SAVE_DELAY = 200;
 const BLOCK_SOURCE_BACKUP_STORAGE_NAME = "last-block-source-backup.json";
 const LEGACY_DRAFT_STORAGE_PREFIX = "siyuan-plugin-markdown-edit-mode:source-draft:v1:";
 const PENDING_CURSOR_HINT_MAX_AGE = 600;
@@ -105,6 +113,9 @@ const DEFAULT_I18N = {
   messageDocumentNotFound: "No active document found",
   messageEnterFailed: "Failed to enter source mode: {{message}}",
   messageBlockSourceFallback: "Block-safe mode is unavailable; using lossy standard Markdown mode.",
+  messageDraftRecovered: "Recovered unsaved source changes",
+  messageDraftStorageFailed: "Could not keep a local recovery draft. Copy important changes before closing.",
+  messageDocumentSwitchBlocked: "The previous document is still open because its source changes could not be saved.",
   messageMarkdownSaved: "Markdown saved",
   messageSaveFailed: "Failed to save Markdown: {{message}}",
   dialogDiscardTitle: "Discard unsaved source changes?",
@@ -113,6 +124,12 @@ const DEFAULT_I18N = {
   dialogSaveRiskTitle: "Save source mode content",
   dialogSaveRiskContent:
     "Saving standard Markdown reparses the document. Complex blocks, block attributes, and child block IDs may not be preserved losslessly. Continue?",
+  dialogRecoverDraftTitle: "Recover unsaved source changes?",
+  dialogRecoverDraftContent:
+    "A local recovery draft was found for this document. Recover it and continue real-time saving? Cancel keeps the recovery draft and leaves source mode closed.",
+  dialogDraftConflictTitle: "Discard conflicting recovery draft?",
+  dialogDraftConflictContent:
+    "The document changed after this recovery draft was created, so it cannot be restored safely. Continue only to discard the draft and open the current document. Cancel keeps the draft and leaves source mode closed.",
   statusRealtimeEnabled: "Real-time updates enabled",
   statusRealtimeReadonly: "The current context is read-only; real-time updates are disabled",
   statusRealtimeSaving: "Updating...",
@@ -173,16 +190,17 @@ interface SourceCursorSnapshot {
 }
 
 const typoraHighlightStyle = HighlightStyle.define([
-  { tag: t.heading, color: "#dc4f87", fontWeight: "700" },
+  { tag: t.heading, color: "var(--b3-theme-primary, #dc4f87)", fontWeight: "700" },
   { tag: t.heading1, fontSize: "1.85em", lineHeight: "1.5" },
   { tag: t.heading2, fontSize: "1.35em" },
-  { tag: t.strong, color: "#111827", fontWeight: "700" },
+  { tag: t.strong, color: "var(--b3-theme-on-background, #111827)", fontWeight: "700" },
   { tag: t.emphasis, fontStyle: "italic" },
-  { tag: [t.link, t.url], color: "#2456a6" },
-  { tag: [t.monospace, t.special(t.string)], color: "#2449a6" },
-  { tag: t.quote, color: "#65717c" },
-  { tag: [t.meta, t.processingInstruction], color: "#dc4f87" },
-  { tag: t.atom, color: "#8a5b12" },
+  { tag: [t.link, t.url], color: "var(--b3-theme-primary, #2456a6)" },
+  { tag: [t.monospace, t.special(t.string)], color: "var(--b3-theme-on-background, #2449a6)" },
+  { tag: t.labelName, color: "var(--b3-theme-primary, #dc4f87)", fontWeight: "600" },
+  { tag: t.quote, color: "var(--b3-theme-on-surface, #65717c)" },
+  { tag: [t.meta, t.processingInstruction], color: "var(--b3-theme-primary, #dc4f87)" },
+  { tag: t.atom, color: "var(--b3-theme-primary, #8a5b12)" },
 ]);
 
 export default class MarkdownEditModePlugin extends Plugin {
@@ -206,6 +224,7 @@ export default class MarkdownEditModePlugin extends Plugin {
   private lastRenderedCursorHint: DocumentCursorHint | null = null;
   private lastSourceCursor: SourceCursorSnapshot | null = null;
   private realtimeSaveTimerId: number | null = null;
+  private sourceDraftTimerId: number | null = null;
   private readonlySyncTimerId: number | null = null;
   private realtimeSavePromise: Promise<boolean> | null = null;
   private realtimeSaveRequested = false;
@@ -230,6 +249,8 @@ export default class MarkdownEditModePlugin extends Plugin {
   private ctrlTapHadOtherKey = false;
   private lastCtrlTapAt = 0;
   private isDiscardPromptOpen = false;
+  private isHandlingDocumentSwitch = false;
+  private lastDraftStorageErrorAt = 0;
   private statusButtonClickGate = createClickSuppressionGate();
   private exitButtonClickGate = createClickSuppressionGate();
 
@@ -364,6 +385,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.eventBus.off("loaded-protyle-static", this.protyleSwitchHandler);
     this.eventBus.off("switch-protyle-mode", this.protyleSwitchHandler);
 
+    this.persistSourceDraftNow();
     void this.flushRealtimeSave();
     this.cleanupReloadRestore();
     this.cleanupSourceMode();
@@ -383,7 +405,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     button.className = STATUS_BUTTON_CLASS;
     button.classList.add("is-hidden");
     button.type = "button";
-    button.tabIndex = -1;
+    button.tabIndex = 0;
     setModeButtonContent(button, this.t("buttonEnterSourceMode"));
     button.title = this.t("titleToggleSourceMode");
     button.setAttribute("aria-label", this.t("titleToggleSourceMode"));
@@ -489,6 +511,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       let removedFrontMatterCount = 0;
       let removedDocTitleHeadingCount = 0;
       let docTitle: string | null = null;
+      let recoveredDraft: SourceDraft | null = null;
 
       try {
         const [children, rootKramdown] = await Promise.all([
@@ -533,26 +556,40 @@ export default class MarkdownEditModePlugin extends Plugin {
         showMessage(this.t("messageBlockSourceFallback"), 5000, "error");
       }
 
+      recoveredDraft = await this.resolveSourceDraftForEnter(context.docId, markdown);
+
+      if (generation !== this.operationGeneration) {
+        return;
+      }
+
+      if (recoveredDraft) {
+        markdown = recoveredDraft.currentMarkdown;
+      }
+
       this.clearLegacyDraft(context.docId);
       const resolvedCursor = resolveMarkdownCursorPosition(markdown, cursorHint);
-      const initialCursor = this.blockSourceDocument
-        ? movePositionOutsideProtectedBlock(this.blockSourceDocument, resolvedCursor)
+      const recoveredCursor = recoveredDraft
+        ? clampEditorPosition(recoveredDraft.cursorPosition, markdown.length)
         : resolvedCursor;
+      const initialCursor = this.blockSourceDocument
+        ? movePositionOutsideProtectedBlock(this.blockSourceDocument, recoveredCursor)
+        : recoveredCursor;
+      const initialViewportY = recoveredDraft?.cursorViewportY ?? cursorHint?.viewportY ?? null;
       this.activeProtyle = context.protyle;
       this.activeDocId = context.docId;
       const editor = this.createFullscreenEditor(
         markdown,
         initialCursor,
-        cursorHint?.viewportY ?? null,
+        initialViewportY,
         getRenderedTextWidth(context.protyle),
       );
 
       this.sourceEditor = editor;
       this.startReadonlySync();
-      this.originalMarkdown = markdown;
-      this.lastSavedMarkdown = markdown;
-      this.sourceDirty = false;
-      this.rememberSourceCursor(editor, initialCursor, cursorHint?.viewportY ?? null);
+      this.originalMarkdown = recoveredDraft?.baseMarkdown ?? markdown;
+      this.lastSavedMarkdown = recoveredDraft?.baseMarkdown ?? markdown;
+      this.sourceDirty = Boolean(recoveredDraft);
+      this.rememberSourceCursor(editor, initialCursor, initialViewportY);
       this.hasRealtimeSaved = false;
       this.removedFrontMatterCount = removedFrontMatterCount;
       this.removedDocTitleHeadingCount = removedDocTitleHeadingCount;
@@ -560,7 +597,18 @@ export default class MarkdownEditModePlugin extends Plugin {
       this.isSourceMode = true;
 
       this.updateButtonState(true);
+
+      if (recoveredDraft) {
+        this.updateRealtimeSaveStatus(this.t("messageDraftRecovered"));
+        showMessage(this.t("messageDraftRecovered"), 3000, "info");
+        this.scheduleRealtimeSave();
+      }
     } catch (error) {
+      if (error instanceof SourceDraftRecoveryCancelledError) {
+        this.cleanupSourceMode();
+        return;
+      }
+
       console.error(error);
       showMessage(
         this.t("messageEnterFailed", { message: getErrorMessage(error) }),
@@ -599,7 +647,7 @@ export default class MarkdownEditModePlugin extends Plugin {
     const exitButton = document.createElement("button");
     exitButton.className = EXIT_BUTTON_CLASS;
     exitButton.type = "button";
-    exitButton.tabIndex = -1;
+    exitButton.tabIndex = 0;
     setModeButtonContent(exitButton, this.t("buttonExitSourceMode"));
     exitButton.title = this.t("titleSaveAndExitSourceMode");
     exitButton.setAttribute("aria-label", this.t("titleSaveAndExitSourceMode"));
@@ -640,6 +688,9 @@ export default class MarkdownEditModePlugin extends Plugin {
     const saveStatus = document.createElement("div");
     saveStatus.className = SAVE_STATUS_CLASS;
     saveStatus.textContent = this.getInitialSaveStatus();
+    saveStatus.setAttribute("role", "status");
+    saveStatus.setAttribute("aria-live", "polite");
+    saveStatus.setAttribute("aria-atomic", "true");
 
     fullscreen.appendChild(editorHost);
     fullscreen.appendChild(exitButton);
@@ -716,6 +767,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       highlightActiveLine(),
       highlightActiveLineGutter(),
       markdown(),
+      markdownStructureDecorations,
       EditorView.lineWrapping,
       syntaxHighlighting(typoraHighlightStyle, { fallback: true }),
       ...(this.blockEditorSupport ? [this.blockEditorSupport.extension] : []),
@@ -730,6 +782,7 @@ export default class MarkdownEditModePlugin extends Plugin {
 
         if (update.docChanged) {
           this.sourceDirty = true;
+          this.scheduleSourceDraftSave();
           this.scheduleRealtimeSave();
         }
       }),
@@ -933,6 +986,10 @@ export default class MarkdownEditModePlugin extends Plugin {
             : this.t("statusRealtimeReadonly"),
           true,
         );
+
+        if (save && this.hasSourceChanges()) {
+          return;
+        }
       }
 
       const shouldReloadEditor = saved || this.hasRealtimeSaved;
@@ -962,6 +1019,7 @@ export default class MarkdownEditModePlugin extends Plugin {
 
   private cleanupSourceMode() {
     this.stopRealtimeSaveTimer();
+    this.stopSourceDraftTimer();
     this.clearProtectedStatusTimer();
     this.stopReadonlySync();
     this.sourceEditor?.destroy();
@@ -1240,6 +1298,160 @@ export default class MarkdownEditModePlugin extends Plugin {
     }, REALTIME_SAVE_DELAY);
   }
 
+  private scheduleSourceDraftSave() {
+    this.stopSourceDraftTimer();
+    this.sourceDraftTimerId = window.setTimeout(() => {
+      this.sourceDraftTimerId = null;
+      this.persistSourceDraftNow();
+    }, SOURCE_DRAFT_SAVE_DELAY);
+  }
+
+  private stopSourceDraftTimer() {
+    if (this.sourceDraftTimerId !== null) {
+      window.clearTimeout(this.sourceDraftTimerId);
+      this.sourceDraftTimerId = null;
+    }
+  }
+
+  private persistSourceDraftNow() {
+    const docId = this.activeDocId;
+    const editor = this.sourceEditor;
+
+    if (!docId || !editor) {
+      return;
+    }
+
+    const currentMarkdown = editor.state.doc.toString();
+    const baseMarkdown = this.lastSavedMarkdown;
+
+    if (currentMarkdown === baseMarkdown && !this.needsCleanupSave()) {
+      this.clearSourceDraft(docId);
+      return;
+    }
+
+    const cursor = this.getSourceCursorSnapshot(editor);
+    const blockRanges = this.sourceModeKind === "block" && this.blockEditorSupport
+      ? this.blockEditorSupport.getMappedBlocks(editor.state).map(({ id, from, to }) => ({
+        id,
+        from,
+        to,
+      }))
+      : null;
+    const draft: SourceDraft = {
+      version: 2,
+      docId,
+      mode: this.sourceModeKind,
+      baseMarkdown,
+      currentMarkdown,
+      updatedAt: Date.now(),
+      cursorPosition: cursor.position,
+      cursorViewportY: cursor.viewportY,
+      blockRanges,
+    };
+
+    try {
+      window.localStorage.setItem(getSourceDraftStorageKey(docId), JSON.stringify(draft));
+    } catch (error) {
+      console.error(error);
+      const now = Date.now();
+
+      if (now - this.lastDraftStorageErrorAt > 5000) {
+        this.lastDraftStorageErrorAt = now;
+        this.updateRealtimeSaveStatus(this.t("messageDraftStorageFailed"), true);
+        showMessage(this.t("messageDraftStorageFailed"), 5000, "error");
+      }
+    }
+  }
+
+  private async resolveSourceDraftForEnter(
+    docId: string,
+    currentMarkdown: string,
+  ): Promise<SourceDraft | null> {
+    const draft = this.readSourceDraft(docId);
+
+    if (!draft) {
+      return null;
+    }
+
+    const state = classifySourceDraft(draft, {
+      docId,
+      mode: this.sourceModeKind,
+      currentMarkdown,
+      blockIds: this.blockSourceDocument?.blocks.map((block) => block.id),
+    });
+
+    if (state === "already-saved" || state === "unchanged") {
+      this.clearSourceDraft(docId);
+      return null;
+    }
+
+    if (state === "conflict") {
+      const discard = await this.confirmChoice(
+        this.t("dialogDraftConflictTitle"),
+        this.t("dialogDraftConflictContent"),
+      );
+
+      if (!discard) {
+        throw new SourceDraftRecoveryCancelledError();
+      }
+
+      this.clearSourceDraft(docId);
+      return null;
+    }
+
+    if (this.isReadonlyContext()) {
+      return draft;
+    }
+
+    const recover = await this.confirmChoice(
+      this.t("dialogRecoverDraftTitle"),
+      this.t("dialogRecoverDraftContent"),
+    );
+
+    if (!recover) {
+      throw new SourceDraftRecoveryCancelledError();
+    }
+
+    if (this.blockSourceDocument && draft.blockRanges) {
+      const rangeById = new Map(draft.blockRanges.map((range) => [range.id, range]));
+
+      for (const block of this.blockSourceDocument.blocks) {
+        const range = rangeById.get(block.id);
+
+        if (!range) {
+          throw new SourceDraftRecoveryCancelledError();
+        }
+
+        block.from = range.from;
+        block.to = range.to;
+      }
+    }
+
+    return draft;
+  }
+
+  private readSourceDraft(docId: string): SourceDraft | null {
+    try {
+      return parseSourceDraft(window.localStorage.getItem(getSourceDraftStorageKey(docId)));
+    } catch {
+      return null;
+    }
+  }
+
+  private clearSourceDraft(docId: string) {
+    try {
+      window.localStorage.removeItem(getSourceDraftStorageKey(docId));
+    } catch {
+      // The draft will be reclassified against the remote snapshot next time.
+    }
+  }
+
+  private confirmChoice(title: string, content: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      confirm(title, content, () => resolve(true), () => resolve(false));
+    });
+  }
+
   private stopRealtimeSaveTimer() {
     if (this.realtimeSaveTimerId !== null) {
       window.clearTimeout(this.realtimeSaveTimerId);
@@ -1330,6 +1542,13 @@ export default class MarkdownEditModePlugin extends Plugin {
       this.removedFrontMatterCount = 0;
       this.removedDocTitleHeadingCount = 0;
       this.hasRealtimeSaved = true;
+      this.sourceDirty = editor.state.doc.toString() !== markdown;
+
+      if (this.sourceDirty) {
+        this.persistSourceDraftNow();
+      } else {
+        this.clearSourceDraft(docId);
+      }
       this.updateRealtimeSaveStatus(
         this.t("statusRealtimeSuccess", { time: formatStatusTime(new Date()) }),
       );
@@ -1451,6 +1670,7 @@ export default class MarkdownEditModePlugin extends Plugin {
 
     if (edits.length === 0) {
       this.sourceDirty = false;
+      this.clearSourceDraft(docId);
       this.updateRealtimeSaveStatus(this.getInitialSaveStatus());
       return false;
     }
@@ -1701,6 +1921,12 @@ export default class MarkdownEditModePlugin extends Plugin {
       this.sourceDirty =
         editor.state.doc.toString() !== startMarkdown ||
         this.getCurrentBlockEdits(editor).length > 0;
+
+      if (this.sourceDirty) {
+        this.persistSourceDraftNow();
+      } else {
+        this.clearSourceDraft(docId);
+      }
       this.updateRealtimeSaveStatus(
         this.t("statusBlockSuccess", {
           count: edits.length,
@@ -1791,6 +2017,8 @@ export default class MarkdownEditModePlugin extends Plugin {
       return;
     }
 
+    element.setAttribute("role", isError ? "alert" : "status");
+    element.setAttribute("aria-live", isError ? "assertive" : "polite");
     element.textContent = text;
     element.classList.toggle("is-error", isError);
   }
@@ -2240,15 +2468,39 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.isDiscardPromptOpen = false;
 
     if (discard && this.isSourceMode && !this.isSaving) {
+      if (this.activeDocId) {
+        this.clearSourceDraft(this.activeDocId);
+      }
       await this.exitSourceMode(false);
     }
   }
 
   private beforeUnloadHandler = () => {
+    this.persistSourceDraftNow();
     void this.flushRealtimeSave();
   };
 
-  private protyleSwitchHandler = () => {
+  private protyleSwitchHandler = (event: CustomEvent<{ protyle: IProtyle }>) => {
+    const nextDocId = event.detail?.protyle?.block?.rootID;
+    const activeDocId = getActiveEditorContext()?.docId;
+    const isActualDocumentSwitch =
+      event.type === "switch-protyle" || activeDocId === nextDocId;
+
+    if (
+      this.isSourceMode &&
+      isActualDocumentSwitch &&
+      nextDocId &&
+      nextDocId !== this.activeDocId &&
+      !this.isHandlingDocumentSwitch
+    ) {
+      this.persistSourceDraftNow();
+      this.isHandlingDocumentSwitch = true;
+      void this.finishSourceModeForDocumentSwitch().finally(() => {
+        this.isHandlingDocumentSwitch = false;
+      });
+      return;
+    }
+
     if (this.isSourceMode) {
       return;
     }
@@ -2259,6 +2511,21 @@ export default class MarkdownEditModePlugin extends Plugin {
     this.updateButtonsBusy(false);
     this.positionStatusButton();
   };
+
+  private async finishSourceModeForDocumentSwitch() {
+    await this.exitSourceMode(true);
+
+    if (this.isSourceMode) {
+      showMessage(this.t("messageDocumentSwitchBlocked"), 5000, "error");
+    }
+  }
+}
+
+class SourceDraftRecoveryCancelledError extends Error {
+  constructor() {
+    super("Source draft recovery cancelled");
+    this.name = "SourceDraftRecoveryCancelledError";
+  }
 }
 
 function hasSameSiyuanBlockIdentityOrder(

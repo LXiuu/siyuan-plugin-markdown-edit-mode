@@ -17,9 +17,9 @@ The plugin adds a `Source` button near the lower-left corner of the current docu
 ## Overview
 
 - Adds a `Source` button in the lower-left corner of the document.
-- Includes Markdown highlighting, line numbers, wrapping, bracket matching, and undo history.
+- Includes clearer Markdown highlighting, line numbers, wrapping, bracket matching, and undo history.
 - Lets you edit regular content as one continuous Markdown document while clearly marking content that is locked.
-- Saves changes automatically and shows the current save status in the lower-right corner.
+- Saves changes automatically, keeps a recovery draft when needed, and shows the current save status in the lower-right corner.
 - Tries to keep your reading position when entering and leaving source mode.
 - Refreshes the document and outline after you exit.
 
@@ -51,6 +51,14 @@ Status messages:
 | `The current context is read-only; real-time updates are disabled` | The current environment does not allow writes |
 
 ## Changelog
+
+### v0.1.9
+
+- Unsaved changes can now be recovered after a reload or interrupted exit.
+- Switching documents in source mode is safer and no longer risks applying pending work to the wrong document.
+- Improved saving for emoji, multilingual text, and empty paragraphs.
+- Refined light and dark themes, with clearer Markdown tables and code blocks.
+- Improved keyboard navigation and accessibility.
 
 ### v0.1.8
 

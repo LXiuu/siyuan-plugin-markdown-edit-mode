@@ -6,6 +6,7 @@ export interface NormalizeMarkdownResult {
 
 export interface NormalizeSiyuanExportMarkdownOptions {
   docTitle?: string | null;
+  removeEmptyParagraphMarkers?: boolean;
 }
 
 const SIYUAN_FRONT_MATTER_KEYS = new Set(["title", "date", "lastmod"]);
@@ -17,6 +18,10 @@ export function normalizeSiyuanExportMarkdown(
 ): NormalizeMarkdownResult {
   let normalized = normalizeMarkdownForSave(markdown);
   let removedFrontMatterCount = 0;
+
+  if (options.removeEmptyParagraphMarkers) {
+    normalized = removeStandaloneSiyuanEmptyParagraphMarkers(normalized);
+  }
 
   while (true) {
     const next = removeOneSiyuanFrontMatter(normalized);
@@ -41,9 +46,11 @@ export function normalizeSiyuanExportMarkdown(
 export function normalizeMarkdownForSave(markdown: string): string {
   return markdown
     .replace(/^\uFEFF/, "")
-    .replace(/\r\n?/g, "\n")
-    .replace(/\u00A0/g, " ")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "");
+    .replace(/\r\n?/g, "\n");
+}
+
+function removeStandaloneSiyuanEmptyParagraphMarkers(markdown: string): string {
+  return markdown.replace(/^[ \t]*\u200D[ \t]*$/gm, "");
 }
 
 export function preserveBlankParagraphsForSiyuanSave(markdown: string): string {

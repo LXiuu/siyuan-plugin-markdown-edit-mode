@@ -24,6 +24,7 @@
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
+  transition: background-color 160ms ease, color 160ms ease, outline-color 160ms ease;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -69,6 +70,12 @@
   z-index: 3;
 }
 
+.markdown-edit-mode-status-btn:focus-visible,
+.markdown-edit-mode-exit-btn:focus-visible {
+  outline: 2px solid var(--b3-theme-primary, #dc4f87);
+  outline-offset: 2px;
+}
+
 .markdown-edit-mode-status-btn:hover,
 .markdown-edit-mode-exit-btn:hover {
   background: var(--b3-theme-background, #ffffff);
@@ -102,6 +109,11 @@
   z-index: 880;
   display: flex;
   box-sizing: border-box;
+  border-top: 1px solid color-mix(
+    in srgb,
+    var(--b3-border-color, #d8dde3) 72%,
+    transparent
+  );
   background: transparent;
   pointer-events: auto;
   user-select: text;
@@ -147,13 +159,15 @@
 }
 
 .markdown-edit-mode-editor .cm-editor {
+  --markdown-edit-mode-accent: var(--b3-theme-primary, #dc4f87);
+
   height: 100%;
   background: linear-gradient(
     to bottom,
     color-mix(in srgb, var(--markdown-edit-mode-background) 82%, transparent) 0,
     var(--markdown-edit-mode-background) 4px
   );
-  color: #182334;
+  color: var(--b3-theme-on-background, #182334);
   font-family: var(--b3-font-family), "Microsoft YaHei", "PingFang SC", sans-serif;
   font-size: 16px;
   letter-spacing: 0;
@@ -174,7 +188,11 @@
   padding-top: 76px;
   border: none;
   background: transparent;
-  color: #b7bdc6;
+  color: color-mix(
+    in srgb,
+    var(--b3-theme-on-surface, #7a838d) 68%,
+    transparent
+  );
 }
 
 .markdown-edit-mode-editor .cm-lineNumbers .cm-gutterElement {
@@ -196,7 +214,7 @@
   box-sizing: border-box;
   padding: 74px 48px 128px 22px;
   margin: 0 auto;
-  caret-color: #dc4f87;
+  caret-color: var(--markdown-edit-mode-accent);
   user-select: text;
 }
 
@@ -204,23 +222,89 @@
   padding: 0;
 }
 
+.markdown-edit-mode-editor .cm-line.markdown-edit-mode-code-line {
+  font-family: var(--b3-font-family-code), "SFMono-Regular", Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.markdown-edit-mode-editor .markdown-edit-mode-code-mark {
+  color: color-mix(
+    in srgb,
+    var(--markdown-edit-mode-accent) 52%,
+    var(--b3-theme-on-surface, #65717c)
+  );
+}
+
+.markdown-edit-mode-editor .markdown-edit-mode-code-info {
+  color: var(--markdown-edit-mode-accent);
+  font-size: 0.88em;
+  font-weight: 500;
+}
+
+.markdown-edit-mode-editor .markdown-edit-mode-code-text {
+  color: color-mix(
+    in srgb,
+    var(--b3-theme-on-background, #182334) 82%,
+    var(--b3-theme-on-surface, #65717c)
+  );
+}
+
+.markdown-edit-mode-editor .cm-line.markdown-edit-mode-table-line {
+  font-family: var(--b3-font-family-code), "SFMono-Regular", Consolas, monospace;
+}
+
+.markdown-edit-mode-editor .markdown-edit-mode-table-header {
+  color: var(--b3-theme-on-background, #182334);
+  font-weight: 600;
+}
+
+.markdown-edit-mode-editor .markdown-edit-mode-table-delimiter {
+  color: color-mix(
+    in srgb,
+    var(--markdown-edit-mode-accent) 56%,
+    var(--b3-theme-on-surface, #65717c)
+  );
+}
+
 .markdown-edit-mode-editor .cm-activeLine {
-  background: rgba(220, 79, 135, 0.08);
+  background: color-mix(in srgb, var(--markdown-edit-mode-accent) 8%, transparent);
 }
 
 .markdown-edit-mode-editor .cm-activeLineGutter {
   background: transparent;
-  color: #dc4f87;
+  color: var(--markdown-edit-mode-accent);
 }
 
 .markdown-edit-mode-editor .cm-selectionBackground,
 .markdown-edit-mode-editor .cm-content ::selection {
-  background: rgba(220, 79, 135, 0.2) !important;
+  background: color-mix(
+    in srgb,
+    var(--markdown-edit-mode-accent) 20%,
+    transparent
+  ) !important;
 }
 
 .markdown-edit-mode-editor .cm-cursor {
-  border-left-color: #dc4f87;
+  border-left-color: var(--markdown-edit-mode-accent);
   border-left-width: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markdown-edit-mode-status-btn,
+  .markdown-edit-mode-exit-btn {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .markdown-edit-mode-status-btn:focus-visible,
+  .markdown-edit-mode-exit-btn:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .markdown-edit-mode-fullscreen {
+    border-top-color: CanvasText;
+  }
 }
 
 .markdown-edit-mode-editor .markdown-edit-mode-protected-source {

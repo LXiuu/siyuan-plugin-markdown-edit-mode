@@ -59,6 +59,7 @@ export async function exportMdContent(
   const docTitle = getDocTitleFromExportPath(response.data?.hPath);
   const normalized = normalizeSiyuanExportMarkdown(response.data?.content ?? "", {
     docTitle,
+    removeEmptyParagraphMarkers: true,
   });
 
   return {
@@ -74,6 +75,7 @@ export async function updateBlockByMarkdown(
 ): Promise<void> {
   const normalized = normalizeSiyuanExportMarkdown(normalizeMarkdownForSave(markdown), {
     docTitle: options.docTitle,
+    removeEmptyParagraphMarkers: false,
   });
   const response = (await fetchSyncPost("/api/block/updateBlock", {
     id: docId,
