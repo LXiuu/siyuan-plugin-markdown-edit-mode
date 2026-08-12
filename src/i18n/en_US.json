@@ -40,6 +40,7 @@
   "errorBlockIalMissing": "SiYuan block attributes could not be preserved safely.",
   "errorBlockConflict": "The document changed outside source mode. Reload before saving.",
   "errorBlockStructureChanged": "The document block structure changed during saving.",
+  "errorBlockContainerStructureChanged": "This {{type}} marker or item structure changed. The edit remains in source mode but was not written to SiYuan. Restore the structure or discard the edit.",
   "errorBlockValidationFailed": "This {{type}} edit would split a block, change protected structure, or convert to an incompatible block.",
   "errorBlockBackupFailed": "Failed to create the pre-save recovery snapshot",
   "errorBlockVerificationFailed": "SiYuan returned a different block representation after saving.",

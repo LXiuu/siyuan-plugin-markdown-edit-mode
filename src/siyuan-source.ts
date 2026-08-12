@@ -250,6 +250,12 @@ export function validateSiyuanBlockEdit(
     return { valid: false, issue: targetIssue };
   }
 
+  if ((block.type === "l" || block.type === "b") && nextType !== block.type) {
+    return isSafeContainerUnwrap(block.markdown, block.type, nextType)
+      ? { valid: true, nextType }
+      : { valid: false, issue: "changed-structure" };
+  }
+
   if (block.type === "l" || block.type === "b") {
     return nextType === block.type &&
       haveSameSafeContainerStructure(block.markdown, markdown, block.type)
@@ -278,6 +284,39 @@ export function validateSiyuanBlockEdit(
   return nextType === block.type
     ? { valid: true }
     : { valid: true, nextType };
+}
+
+function isSafeContainerUnwrap(
+  markdown: string,
+  containerType: "l" | "b",
+  nextType: string,
+): boolean {
+  if (!SAFE_EDIT_TARGET_TYPES.has(nextType) || nextType === "l" || nextType === "b") {
+    return false;
+  }
+
+  const parsed = parseSiyuanMarkdownBlock(markdown);
+
+  if (
+    !parsed ||
+    parsed.root.type !== containerType ||
+    parsed.root.children.length !== 1
+  ) {
+    return false;
+  }
+
+  const containerChild = parsed.root.children[0];
+  const leaf = containerType === "l"
+    ? containerChild?.type === "i" && containerChild.children.length === 1
+      ? containerChild.children[0]
+      : null
+    : containerChild;
+
+  return Boolean(
+    leaf &&
+    leaf.type === nextType &&
+    leaf.children.length === 0,
+  );
 }
 
 function validateSiyuanEditTarget(

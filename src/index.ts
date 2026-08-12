@@ -1,5 +1,5 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   HighlightStyle,
   bracketMatching,
@@ -149,6 +149,8 @@ const DEFAULT_I18N = {
   errorBlockIalMissing: "SiYuan block attributes could not be preserved safely.",
   errorBlockConflict: "The document changed outside source mode. Reload before saving.",
   errorBlockStructureChanged: "The document block structure changed during saving.",
+  errorBlockContainerStructureChanged:
+    "This {{type}} marker or item structure changed. The edit remains in source mode but was not written to SiYuan. Restore the structure or discard the edit.",
   errorBlockValidationFailed: "This {{type}} edit would split a block, change protected structure, or convert to an incompatible block.",
   errorBlockBackupFailed: "Failed to create the pre-save recovery snapshot",
   errorBlockVerificationFailed: "SiYuan returned a different block representation after saving.",
@@ -190,17 +192,22 @@ interface SourceCursorSnapshot {
 }
 
 const typoraHighlightStyle = HighlightStyle.define([
-  { tag: t.heading, color: "var(--b3-theme-primary, #dc4f87)", fontWeight: "700" },
-  { tag: t.heading1, fontSize: "1.85em", lineHeight: "1.5" },
-  { tag: t.heading2, fontSize: "1.35em" },
+  { tag: t.heading, color: "var(--markdown-edit-mode-accent, #dc4f87)", fontWeight: "680" },
+  { tag: t.heading1, fontSize: "1.55em", lineHeight: "1.35", letterSpacing: "-0.018em" },
+  { tag: t.heading2, fontSize: "1.28em", lineHeight: "1.4", letterSpacing: "-0.012em" },
+  { tag: t.heading3, fontSize: "1.12em", fontWeight: "650" },
+  { tag: [t.heading4, t.heading5, t.heading6], fontSize: "1em", fontWeight: "650" },
   { tag: t.strong, color: "var(--b3-theme-on-background, #111827)", fontWeight: "700" },
-  { tag: t.emphasis, fontStyle: "italic" },
-  { tag: [t.link, t.url], color: "var(--b3-theme-primary, #2456a6)" },
-  { tag: [t.monospace, t.special(t.string)], color: "var(--b3-theme-on-background, #2449a6)" },
-  { tag: t.labelName, color: "var(--b3-theme-primary, #dc4f87)", fontWeight: "600" },
+  { tag: t.emphasis, color: "var(--b3-theme-on-background, #182334)", fontStyle: "italic" },
+  { tag: t.strikethrough, color: "var(--b3-theme-on-surface, #65717c)", textDecoration: "line-through" },
+  { tag: t.link, color: "var(--markdown-edit-mode-accent-strong, #c73c75)" },
+  { tag: t.url, color: "var(--markdown-edit-mode-syntax-muted, #a45f7d)" },
+  { tag: [t.monospace, t.special(t.string)], color: "var(--markdown-edit-mode-accent-strong, #c73c75)" },
+  { tag: t.labelName, color: "var(--markdown-edit-mode-accent, #dc4f87)", fontWeight: "600" },
   { tag: t.quote, color: "var(--b3-theme-on-surface, #65717c)" },
-  { tag: [t.meta, t.processingInstruction], color: "var(--b3-theme-primary, #dc4f87)" },
-  { tag: t.atom, color: "var(--b3-theme-primary, #8a5b12)" },
+  { tag: t.processingInstruction, color: "var(--markdown-edit-mode-syntax-muted, #a45f7d)" },
+  { tag: t.meta, color: "var(--markdown-edit-mode-accent, #dc4f87)" },
+  { tag: t.atom, color: "var(--markdown-edit-mode-accent-strong, #c73c75)" },
 ]);
 
 export default class MarkdownEditModePlugin extends Plugin {
@@ -766,7 +773,7 @@ export default class MarkdownEditModePlugin extends Plugin {
       bracketMatching(),
       highlightActiveLine(),
       highlightActiveLineGutter(),
-      markdown(),
+      markdown({ base: markdownLanguage }),
       markdownStructureDecorations,
       EditorView.lineWrapping,
       syntaxHighlighting(typoraHighlightStyle, { fallback: true }),
@@ -1949,8 +1956,11 @@ export default class MarkdownEditModePlugin extends Plugin {
     block: SiyuanSourceBlock,
     issue: SiyuanBlockValidationIssue | undefined,
   ): Error {
+    const key = issue === "changed-structure"
+      ? "errorBlockContainerStructureChanged"
+      : "errorBlockValidationFailed";
     const error = new Error(
-      this.t("errorBlockValidationFailed", {
+      this.t(key, {
         type: this.getSiyuanBlockTypeLabel(block),
       }),
     );

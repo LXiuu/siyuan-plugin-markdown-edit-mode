@@ -242,7 +242,7 @@ test("keeps an empty editable paragraph usable without exposing separators", asy
   assert.deepEqual(blocked, [null]);
 });
 
-test("allows list content edits but rejects list block-tree changes immediately", async () => {
+test("allows container syntax edits in the editor and validates them before saving", () => {
   const source = createSiyuanSourceDocument(
     [{ id: "list", type: "l", subType: "u", markdown: "- alpha\n- beta" }],
     "root",
@@ -261,7 +261,44 @@ test("allows list content edits but rejects list block-tree changes immediately"
   const structuralEdit = state.update({
     changes: { from: state.doc.length, insert: "\n- gamma" },
   });
-  assert.equal(structuralEdit.docChanged, false);
-  await Promise.resolve();
-  assert.equal(blocked[0]?.id, "list");
+  assert.equal(structuralEdit.docChanged, true);
+  assert.equal(structuralEdit.state.doc.toString(), "- alpha\n- beta\n- gamma");
+  assert.deepEqual(blocked, []);
+  assert.deepEqual(
+    validateSiyuanBlockEdit(source.blocks[0]!, structuralEdit.state.doc.toString()),
+    { valid: false, issue: "changed-structure" },
+  );
+});
+
+test("does not make Markdown structure markers feel undeletable", () => {
+  const cases = [
+    { type: "b", markdown: "> quote", from: 0, to: 1, expected: " quote" },
+    { type: "l", markdown: "- item", from: 0, to: 2, expected: "item" },
+    { type: "l", markdown: "1. item", from: 0, to: 3, expected: "item" },
+    { type: "l", markdown: "- [ ] task", from: 2, to: 6, expected: "- task" },
+    { type: "h", markdown: "## heading", from: 0, to: 3, expected: "heading" },
+    { type: "c", markdown: "```\ncode\n```", from: 0, to: 3, expected: "\ncode\n```" },
+    { type: "t", markdown: "| A |\n| --- |", from: 0, to: 1, expected: " A |\n| --- |" },
+    { type: "tb", markdown: "---", from: 0, to: 1, expected: "--" },
+  ] as const;
+
+  for (const [index, item] of cases.entries()) {
+    const source = createSiyuanSourceDocument(
+      [{ id: `container-${index}`, type: item.type, markdown: item.markdown }],
+      "root",
+    );
+    const blocked: Array<SiyuanSourceBlock | null> = [];
+    const support = createSiyuanSourceEditorSupport(source, {
+      getBlockLabel: (block) => block.type,
+      onBlockedEdit: (block) => blocked.push(block),
+    });
+    const state = EditorState.create({ doc: source.markdown, extensions: [support.extension] });
+    const transaction = state.update({
+      changes: { from: item.from, to: item.to },
+    });
+
+    assert.equal(transaction.docChanged, true, item.markdown);
+    assert.equal(transaction.state.doc.toString(), item.expected, item.markdown);
+    assert.deepEqual(blocked, [], item.markdown);
+  }
 });

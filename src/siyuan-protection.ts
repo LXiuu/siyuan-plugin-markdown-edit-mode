@@ -11,7 +11,6 @@ import {
   type SiyuanSourceBlock,
   type SiyuanSourceDocument,
   summarizeSiyuanBlock,
-  validateSiyuanBlockEdit,
 } from "./siyuan-source";
 
 export interface SiyuanSourceEditorSupport {
@@ -54,7 +53,6 @@ export function createSiyuanSourceEditorSupport(
     }
 
     const blocks = transaction.startState.field(blockField);
-    const touchedBlockIds = new Set<string>();
     let blockedBy: SiyuanSourceBlock | null = null;
     let allowed = true;
 
@@ -66,34 +64,12 @@ export function createSiyuanSourceEditorSupport(
       const editableBlock = findEditableBlockForChange(blocks, sourceById, fromA, toA);
 
       if (editableBlock) {
-        touchedBlockIds.add(editableBlock.id);
         return;
       }
 
       allowed = false;
       blockedBy = findProtectedBlockForChange(blocks, sourceById, fromA, toA);
     });
-
-    if (allowed) {
-      for (const id of touchedBlockIds) {
-        const source = sourceById.get(id);
-        const mapped = blocks.find((block) => block.id === id);
-
-        if (!source || !mapped || (source.type !== "l" && source.type !== "b")) {
-          continue;
-        }
-
-        const from = transaction.changes.mapPos(mapped.from, -1);
-        const to = transaction.changes.mapPos(mapped.to, 1);
-        const candidate = transaction.newDoc.sliceString(from, to);
-
-        if (!validateSiyuanBlockEdit(source, candidate).valid) {
-          allowed = false;
-          blockedBy = source;
-          break;
-        }
-      }
-    }
 
     if (!allowed) {
       const blockedBlock = blockedBy;

@@ -14,6 +14,13 @@ const BLOCK_NODE_CLASSES = {
 } as const;
 
 const MARK_NODE_CLASSES = {
+  InlineCode: "markdown-edit-mode-inline-code",
+  HeaderMark: "markdown-edit-mode-syntax-mark markdown-edit-mode-heading-mark",
+  QuoteMark: "markdown-edit-mode-syntax-mark markdown-edit-mode-quote-mark",
+  ListMark: "markdown-edit-mode-syntax-mark markdown-edit-mode-list-mark",
+  EmphasisMark: "markdown-edit-mode-syntax-mark markdown-edit-mode-emphasis-mark",
+  StrikethroughMark: "markdown-edit-mode-syntax-mark markdown-edit-mode-emphasis-mark",
+  LinkMark: "markdown-edit-mode-syntax-mark markdown-edit-mode-link-mark",
   CodeInfo: "markdown-edit-mode-code-info",
   CodeMark: "markdown-edit-mode-code-mark",
   CodeText: "markdown-edit-mode-code-text",

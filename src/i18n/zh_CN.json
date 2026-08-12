@@ -40,6 +40,7 @@
   "errorBlockIalMissing": "无法安全保留该思源块的属性，已停止写入。",
   "errorBlockConflict": "文档已在源码模式外发生变化，请重新进入后再保存。",
   "errorBlockStructureChanged": "保存期间文档块结构发生了变化。",
+  "errorBlockContainerStructureChanged": "{{type}} 的标记或项目结构发生变化。修改仍保留在源码编辑器中，但尚未写入思源；请恢复原结构或放弃修改。",
   "errorBlockValidationFailed": "{{type}} 修改会拆分块、改变受保护结构或转换为不兼容块，已停止写入。",
   "errorBlockBackupFailed": "创建保存前恢复快照失败",
   "errorBlockVerificationFailed": "保存后思源返回了不同的块结构。",

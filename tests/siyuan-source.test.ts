@@ -528,6 +528,16 @@ test("prioritizes standard Markdown edits while protecting destructive block cha
     valid: false,
     issue: "changed-structure",
   });
+  assert.deepEqual(validateSiyuanBlockEdit(ordered, "alpha"), {
+    valid: true,
+    nextType: "p",
+  });
+
+  const nestedList = makeBlock("l", "- alpha\n  - nested");
+  assert.deepEqual(validateSiyuanBlockEdit(nestedList, "alpha\n  nested"), {
+    valid: false,
+    issue: "changed-structure",
+  });
 
   const blockquote = makeBlock("b", "> alpha\n>\n> beta");
   assert.deepEqual(
@@ -538,6 +548,26 @@ test("prioritizes standard Markdown edits while protecting destructive block cha
     validateSiyuanBlockEdit(blockquote, "> alpha\n>\n> beta\n>\n> gamma"),
     { valid: false, issue: "changed-structure" },
   );
+  assert.deepEqual(validateSiyuanBlockEdit(blockquote, "alpha"), {
+    valid: false,
+    issue: "changed-structure",
+  });
+
+  const singleParagraphBlockquote = makeBlock("b", "> alpha");
+  assert.deepEqual(validateSiyuanBlockEdit(singleParagraphBlockquote, "alpha"), {
+    valid: true,
+    nextType: "p",
+  });
+  assert.deepEqual(
+    validateSiyuanBlockEdit(singleParagraphBlockquote, "alpha\ncontinued"),
+    { valid: true, nextType: "p" },
+  );
+
+  const singleHeadingBlockquote = makeBlock("b", "> # Heading");
+  assert.deepEqual(validateSiyuanBlockEdit(singleHeadingBlockquote, "# Heading"), {
+    valid: true,
+    nextType: "h",
+  });
 
   const table = makeBlock("t", "| A | B |\n| --- | --- |\n| a | b |");
   assert.deepEqual(
